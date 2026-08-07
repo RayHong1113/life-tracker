@@ -4,9 +4,7 @@ import 'providers/activity_provider.dart';
 import 'views/home/home_screen.dart';
 
 void main() {
-  // Ensure Flutter engine bindings are initialized before calling native database plugins
   WidgetsFlutterBinding.ensureInitialized();
-  
   runApp(const MyApp());
 }
 
@@ -15,7 +13,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // MultiProvider allows injecting state management models at the top level of the widget tree
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(

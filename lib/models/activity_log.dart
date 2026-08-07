@@ -1,10 +1,12 @@
-/// Represents a single time-blocked activity or task log.
+import 'package:flutter/material.dart';
+
 class ActivityLog {
   final String id;
-  final String title;         // Activity description (e.g., "Studying Flutter", "Work Shift")
-  final DateTime startTime;   // Start timestamp
-  final DateTime? endTime;    // End timestamp (nullable if the activity is currently ongoing)
-  final String description;   // Optional detailed notes
+  final String title;
+  final DateTime startTime;
+  final DateTime? endTime;
+  final String description;
+  final Color color;
 
   ActivityLog({
     required this.id,
@@ -12,9 +14,9 @@ class ActivityLog {
     required this.startTime,
     this.endTime,
     this.description = '',
+    this.color = const Color(0xFF1A73E8),
   });
 
-  /// Converts the [ActivityLog] instance into a [Map] for SQLite database storage.
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -22,19 +24,20 @@ class ActivityLog {
       'start_time': startTime.toIso8601String(),
       'end_time': endTime?.toIso8601String(),
       'description': description,
+      'color': color.toARGB32(),
     };
   }
 
-  /// Creates an [ActivityLog] instance from a database [Map].
   factory ActivityLog.fromMap(Map<String, dynamic> map) {
     return ActivityLog(
-      id: map['id'] as String,
-      title: map['title'] as String,
-      startTime: DateTime.parse(map['start_time'] as String),
-      endTime: map['end_time'] != null 
-          ? DateTime.parse(map['end_time'] as String) 
-          : null,
-      description: map['description'] as String? ?? '',
+      id: map['id'],
+      title: map['title'],
+      startTime: DateTime.parse(map['start_time']),
+      endTime: map['end_time'] != null ? DateTime.parse(map['end_time']) : null,
+      description: map['description'] ?? '',
+      color: map['color'] != null
+          ? Color(map['color'])
+          : const Color(0xFF1A73E8),
     );
   }
 }
