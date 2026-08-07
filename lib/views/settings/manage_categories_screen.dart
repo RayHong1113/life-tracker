@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/activity_provider.dart';
 import 'category_form_screen.dart'; // 💡 导入刚才新建的表单页面
+import '../../models/activity_category.dart';
 
 class ManageCategoriesScreen extends StatelessWidget {
   const ManageCategoriesScreen({super.key});

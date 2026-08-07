@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/activity_log.dart';
+import '../../models/activity_category.dart'; // 💡 补上缺失的 Category Model 导入
 import '../../providers/activity_provider.dart';
 
 class AddActivityScreen extends StatefulWidget {
@@ -75,8 +76,9 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
     );
   }
 
-  // 💡 改为 async 函数，增加 await 保证数据库写完盘再退出
   void _saveActivity(List<ActivityCategory> categories) async {
+    if (categories.isEmpty) return;
+    
     final category = _selectedCategory ?? categories[0];
 
     final startDateTime = DateTime(
@@ -87,7 +89,6 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       _startTimeOfDay.minute,
     );
 
-    // 1. 先按选中的日期和时间组合
     DateTime endDateTime = DateTime(
       _endDate.year,
       _endDate.month,
@@ -96,7 +97,6 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       _endTimeOfDay.minute,
     );
 
-    // 💡 2. 关键修复：如果结束时间早于或等于开始时间（比如选了 midnight 00:00），说明跨天了，自动给结束时间 +1 天！
     if (endDateTime.isBefore(startDateTime) || endDateTime.isAtSameMomentAs(startDateTime)) {
       endDateTime = endDateTime.add(const Duration(days: 1));
     }
@@ -161,10 +161,12 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
 
     final isEditing = widget.existingActivity != null;
 
-    _selectedCategory ??= categories.firstWhere(
-      (cat) => isEditing && (cat.name == widget.existingActivity!.title || cat.color.toARGB32() == widget.existingActivity!.color.toARGB32()),
-      orElse: () => categories[0],
-    );
+    if (categories.isNotEmpty) {
+      _selectedCategory ??= categories.firstWhere(
+        (cat) => isEditing && (cat.name == widget.existingActivity!.title || cat.color.toARGB32() == widget.existingActivity!.color.toARGB32()),
+        orElse: () => categories[0],
+      );
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFF1E262C),

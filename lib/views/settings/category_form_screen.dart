@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/activity_provider.dart';
+import '../../models/activity_category.dart';
 
 class CategoryFormScreen extends StatefulWidget {
   final ActivityCategory? existingCategory;

@@ -30,8 +30,10 @@ class _CalendarViewState extends State<CalendarView> {
   bool _isAnimatingPage = false;
   double _currentScrollOffset = 0.0;
 
-  static const double _hourHeight = 70.0;
-  static const double _timeLabelWidth = 50.0;
+  // 💡 布局核心尺寸常量
+  static const double _hourHeight = 70.0;           // 1小时对应的固定物理高度
+  static const double _timeLabelWidth = 50.0;       // 左侧时间轴宽度
+  static const double _cellHorizontalMargin = 2.0;  // 格子/卡片左右缩进 Margin
 
   @override
   void dispose() {
@@ -145,13 +147,12 @@ class _CalendarViewState extends State<CalendarView> {
                         },
                         child: SingleChildScrollView(
                           controller: pageScrollController,
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 12.0, horizontal: 10.0),
+                          // 💡 关键：移除 horizontal padding，保证背景格与卡片共享完全相同的边界基准！
+                          padding: const EdgeInsets.only(top: 12.0, bottom: 24.0, left: 6.0, right: 6.0),
                           child: LayoutBuilder(
                             builder: (context, constraints) {
-                              final availableWidth = constraints.maxWidth -
-                                  _timeLabelWidth -
-                                  4.0;
+                              // 计算背景格子中，右侧白色 Container 的实际净可用宽度
+                              final gridContentWidth = constraints.maxWidth - _timeLabelWidth;
 
                               return Stack(
                                 children: [
@@ -165,7 +166,7 @@ class _CalendarViewState extends State<CalendarView> {
                                       pos,
                                       provider,
                                       pageDate,
-                                      availableWidth,
+                                      gridContentWidth,
                                     );
                                   }),
                                 ],
@@ -263,7 +264,6 @@ class _CalendarViewState extends State<CalendarView> {
     );
   }
 
-  // 💡 升级后的 Google Calendar 风格最小列占用并排重叠算法
   List<_PositionedActivity> _calculateOverlapPositions(
       List<ActivityLog> activities) {
     if (activities.isEmpty) return [];
@@ -275,7 +275,6 @@ class _CalendarViewState extends State<CalendarView> {
     List<_PositionedActivity> currentGroup = [];
     DateTime? groupEnd;
 
-    // 1. 划分有时间重叠交叉的大块 Group
     for (var pos in sorted) {
       final start = pos.activity.startTime;
       final end = pos.activity.endTime ?? start.add(const Duration(hours: 1));
@@ -294,7 +293,6 @@ class _CalendarViewState extends State<CalendarView> {
     }
     if (currentGroup.isNotEmpty) groups.add(currentGroup);
 
-    // 2. 贪心算法：给重叠组内的活动分配紧凑列号（Column Index）
     for (var group in groups) {
       final List<DateTime> columnEndTimes = [];
 
@@ -305,7 +303,6 @@ class _CalendarViewState extends State<CalendarView> {
 
         int assignedColumn = -1;
 
-        // 判断是否有已存在的列可以顺着接下去
         for (int c = 0; c < columnEndTimes.length; c++) {
           if (!start.isBefore(columnEndTimes[c])) {
             assignedColumn = c;
@@ -314,7 +311,6 @@ class _CalendarViewState extends State<CalendarView> {
           }
         }
 
-        // 如果现有列都冲突，开辟新列
         if (assignedColumn == -1) {
           assignedColumn = columnEndTimes.length;
           columnEndTimes.add(end);
@@ -323,7 +319,6 @@ class _CalendarViewState extends State<CalendarView> {
         pos.column = assignedColumn;
       }
 
-      // 将该重叠组的最大并发列数赋给属于该组的所有活动
       final maxCols = columnEndTimes.length;
       for (var pos in group) {
         pos.totalColumns = maxCols;
@@ -343,21 +338,33 @@ class _CalendarViewState extends State<CalendarView> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // 💡 1. 左侧时间刻度加上 InkWell，实现点击高亮
           SizedBox(
             width: _timeLabelWidth,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4.0),
-              child: Text(
-                '$formattedHour $amPm',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                  color: isSelected ? const Color(0xFF1A73E8) : Colors.grey,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6.0),
+              onTap: () {
+                setState(() {
+                  _selectedHour = hour;
+                });
+              },
+              child: Container(
+                alignment: Alignment.topCenter,
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  '$formattedHour $amPm',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected ? const Color(0xFF1A73E8) : Colors.grey,
+                  ),
                 ),
               ),
             ),
           ),
+
+          // 💡 2. 右侧主体时间格保持不变
           Expanded(
             child: InkWell(
               onTap: () {
@@ -366,8 +373,10 @@ class _CalendarViewState extends State<CalendarView> {
                 });
               },
               child: Container(
-                margin:
-                    const EdgeInsets.symmetric(vertical: 2.0, horizontal: 2.0),
+                margin: const EdgeInsets.symmetric(
+                  vertical: 1.0,
+                  horizontal: _cellHorizontalMargin,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? const Color(0xFFE8F0FE) : Colors.white,
                   borderRadius: BorderRadius.circular(6.0),
@@ -405,7 +414,7 @@ class _CalendarViewState extends State<CalendarView> {
     _PositionedActivity pos,
     ActivityProvider provider,
     DateTime pageDate,
-    double availableWidth,
+    double gridContentWidth,
   ) {
     final activity = pos.activity;
     final startTime = activity.startTime;
@@ -425,50 +434,69 @@ class _CalendarViewState extends State<CalendarView> {
 
     final double pixelsPerMinute = _hourHeight / 60.0;
 
-    final double topOffset = startMinutes * pixelsPerMinute;
+    // Y 轴垂直方向精准嵌套
+    final double topOffset = (startMinutes * pixelsPerMinute) + 2.0;
+    final double rawCardHeight = (durationMinutes * pixelsPerMinute) - 3.0;
+    final double cardHeight = rawCardHeight.clamp(6.0, 1800.0);
 
-    final double rawCardHeight = (durationMinutes * pixelsPerMinute) - 2.0;
-    // 💡 这里的 22.0 可以根据你的需求调整最小卡片高度
-    final double cardHeight = rawCardHeight.clamp(22.0, 1800.0);
+    // 💡 X 轴水平方向 100% 精确对齐算法
+    final double columnWidth = gridContentWidth / pos.totalColumns;
+    
+    // 起始点 = 时间轴宽 + (第几列 * 列宽) + 格子单侧 Margin
+    final double leftOffset = _timeLabelWidth + (pos.column * columnWidth) + _cellHorizontalMargin;
+    
+    // 卡片宽 = 列宽 - 双侧 Margin (左右各 2px，共 4px)
+    final double cardWidth = (columnWidth - (_cellHorizontalMargin * 2.0)).clamp(20.0, gridContentWidth);
 
-    final columnWidth = availableWidth / pos.totalColumns;
-    final leftOffset = _timeLabelWidth + (pos.column * columnWidth) + 2.0;
-    final cardWidth = (columnWidth - 4.0).clamp(30.0, availableWidth);
-
-    // 💡 关键判断：如果卡片宽度小于 80px，或者因为重叠列数太多（totalColumns > 2），自动切换为竖向布局！
     final bool useVerticalLayout = cardWidth < 80.0 || pos.totalColumns > 2;
 
     return Positioned(
-      top: topOffset + 1.0,
+      top: topOffset,
       left: leftOffset,
       width: cardWidth,
       height: cardHeight,
-      child: Material(
-        elevation: 2,
-        borderRadius: BorderRadius.circular(6.0),
-        color: activity.color,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(6.0),
-          onTap: () {
-            _openAddOrEditActivityScreen(
-              context,
-              selectedDate: provider.selectedDate,
-              existingActivity: activity,
-            );
-          },
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-            child: useVerticalLayout
-                ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, provider)
-                : _buildHorizontalLayout(activity, startTime, endTime, cardHeight, provider),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(cardHeight < 12.0 ? 2.0 : 5.0),
+        child: Container(
+          decoration: BoxDecoration(
+            color: activity.color,
+            borderRadius: BorderRadius.circular(cardHeight < 12.0 ? 2.0 : 5.0),
+            boxShadow: cardHeight < 12.0
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.12),
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+          ),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              _openAddOrEditActivityScreen(
+                context,
+                selectedDate: provider.selectedDate,
+                existingActivity: activity,
+              );
+            },
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: 2.0, 
+                vertical: cardHeight < 12.0 ? 0.0 : 1.0
+              ),
+              child: cardHeight < 14.0 
+                  ? const SizedBox.shrink() // 💡 如果高度小于 14px，不渲染文字只展示颜色条，避免挤压盖住下层卡片
+                  : (useVerticalLayout
+                      ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, provider)
+                      : _buildHorizontalLayout(activity, startTime, endTime, cardHeight, provider)),
+            ),
           ),
         ),
       ),
     );
   }
 
-  // 💡 1. 横向布局 (宽卡片)
   Widget _buildHorizontalLayout(
     ActivityLog activity,
     DateTime startTime,
@@ -496,9 +524,9 @@ class _CalendarViewState extends State<CalendarView> {
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
               ),
-              if (cardHeight > 45.0)
+              if (cardHeight > 38.0)
                 Padding(
-                  padding: const EdgeInsets.only(top: 2.0),
+                  padding: const EdgeInsets.only(top: 1.0),
                   child: Text(
                     '${_formatTime(startTime)} - ${_formatTime(endTime)}',
                     style: const TextStyle(
@@ -526,7 +554,6 @@ class _CalendarViewState extends State<CalendarView> {
     );
   }
 
-  // 💡 2. 竖向布局 (窄卡片/重叠较多时)
   Widget _buildVerticalLayout(
     ActivityLog activity,
     DateTime startTime,
@@ -564,9 +591,8 @@ class _CalendarViewState extends State<CalendarView> {
             ),
           ],
         ),
-        // 如果卡片高度足够，把持续时间换行摆在下方
-        if (cardHeight > 35.0) ...[
-          const SizedBox(height: 2),
+        if (cardHeight > 32.0) ...[
+          const SizedBox(height: 1),
           Text(
             _formatTime(startTime),
             style: const TextStyle(
@@ -578,7 +604,7 @@ class _CalendarViewState extends State<CalendarView> {
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
-          if (cardHeight > 50.0)
+          if (cardHeight > 46.0)
             Text(
               '- ${_formatTime(endTime)}',
               style: const TextStyle(

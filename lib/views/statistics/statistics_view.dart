@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../models/activity_log.dart';
 import '../../providers/activity_provider.dart';
+import '../../models/activity_category.dart';
 
 // 支持 Day, Week, Month, Year, All
 enum TimeRange { byDay, byWeek, byMonth, byYear, all }
