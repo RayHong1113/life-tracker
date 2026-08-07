@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/activity_provider.dart';
-import 'category_form_screen.dart'; // 💡 导入刚才新建的表单页面
+import 'category_form_screen.dart';
 import '../../models/activity_category.dart';
 
 class ManageCategoriesScreen extends StatelessWidget {
   const ManageCategoriesScreen({super.key});
 
-  // 💡 跳转到全新的全屏表单页面
   void _navigateToForm(BuildContext context, {ActivityCategory? category}) {
     Navigator.push(
       context,
@@ -62,15 +61,55 @@ class ManageCategoriesScreen extends StatelessWidget {
                       IconButton(
                         icon: const Icon(Icons.delete_outline,
                             color: Colors.redAccent, size: 20),
-                        onPressed: () {
-                          if (categories.length > 1) {
-                            provider.deleteCategory(category.id);
-                          } else {
+                        onPressed: () async {
+                          // 1. 如果只剩最后一个分类，不允许删除，弹底栏提示
+                          if (categories.length <= 1) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                   content: Text(
                                       'At least one category is required.')),
                             );
+                            return;
+                          }
+
+                          // 💡 2. 只有多个分类时，先弹出对话框警告！
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (dialogContext) => AlertDialog(
+                              title: const Text('Delete Category?'),
+                              content: Text.rich(
+                                TextSpan(
+                                  style: const TextStyle(fontSize: 13, height: 1.4, color: Colors.black87),
+                                  children: [
+                                    const TextSpan(text: 'By deleting '),
+                                    TextSpan(
+                                      text: category.name, // 💡 分类名字单独加粗
+                                      style: TextStyle(fontWeight: FontWeight.bold, color: category.color),
+                                    ),
+                                    const TextSpan(text: ', all activity logs recorded under this category will also be permanently deleted.'),
+                                  ],
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                TextButton(
+                                  style: TextButton.styleFrom(
+                                      foregroundColor: Colors.redAccent),
+                                  onPressed: () => Navigator.pop(dialogContext, true),
+                                  child: const Text('Delete',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          // 💡 3. 只有用户在弹窗里点击了 Delete (confirm == true)，才执行删除
+                          if (confirm == true) {
+                            await provider.deleteCategory(category.id);
                           }
                         },
                       ),
