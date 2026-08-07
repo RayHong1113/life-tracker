@@ -75,8 +75,45 @@ class _CalendarViewState extends State<CalendarView> {
     _isAnimatingPage = false;
   }
 
-  void _safeDeleteActivity(ActivityProvider provider, String id) async {
-    await provider.deleteActivity(id);
+  void _safeDeleteActivity(ActivityProvider provider, ActivityLog activity) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Activity?'),
+        content: Text.rich(
+          TextSpan(
+            style: const TextStyle(fontSize: 13, height: 1.4, color: Colors.black87),
+            children: [
+              const TextSpan(text: 'Are you sure you want to delete '),
+              TextSpan(
+                text: activity.title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: activity.color, // 💡 动态读取该卡片分类的颜色
+                ),
+              ),
+              const TextSpan(text: '?'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    // 💡 只有在弹窗里点击了 Delete，才执行删除
+    if (confirm == true) {
+      await provider.deleteActivity(activity.id);
+    }
   }
 
   void _openAddOrEditActivityScreen(BuildContext context,
@@ -147,11 +184,9 @@ class _CalendarViewState extends State<CalendarView> {
                         },
                         child: SingleChildScrollView(
                           controller: pageScrollController,
-                          // 💡 关键：移除 horizontal padding，保证背景格与卡片共享完全相同的边界基准！
                           padding: const EdgeInsets.only(top: 12.0, bottom: 24.0, left: 6.0, right: 6.0),
                           child: LayoutBuilder(
                             builder: (context, constraints) {
-                              // 计算背景格子中，右侧白色 Container 的实际净可用宽度
                               final gridContentWidth = constraints.maxWidth - _timeLabelWidth;
 
                               return Stack(
@@ -338,7 +373,6 @@ class _CalendarViewState extends State<CalendarView> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 💡 1. 左侧时间刻度加上 InkWell，实现点击高亮
           SizedBox(
             width: _timeLabelWidth,
             child: InkWell(
@@ -363,8 +397,6 @@ class _CalendarViewState extends State<CalendarView> {
               ),
             ),
           ),
-
-          // 💡 2. 右侧主体时间格保持不变
           Expanded(
             child: InkWell(
               onTap: () {
@@ -434,18 +466,12 @@ class _CalendarViewState extends State<CalendarView> {
 
     final double pixelsPerMinute = _hourHeight / 60.0;
 
-    // Y 轴垂直方向精准嵌套
     final double topOffset = (startMinutes * pixelsPerMinute) + 2.0;
     final double rawCardHeight = (durationMinutes * pixelsPerMinute) - 3.0;
     final double cardHeight = rawCardHeight.clamp(6.0, 1800.0);
 
-    // 💡 X 轴水平方向 100% 精确对齐算法
     final double columnWidth = gridContentWidth / pos.totalColumns;
-    
-    // 起始点 = 时间轴宽 + (第几列 * 列宽) + 格子单侧 Margin
     final double leftOffset = _timeLabelWidth + (pos.column * columnWidth) + _cellHorizontalMargin;
-    
-    // 卡片宽 = 列宽 - 双侧 Margin (左右各 2px，共 4px)
     final double cardWidth = (columnWidth - (_cellHorizontalMargin * 2.0)).clamp(20.0, gridContentWidth);
 
     final bool useVerticalLayout = cardWidth < 80.0 || pos.totalColumns > 2;
@@ -465,7 +491,7 @@ class _CalendarViewState extends State<CalendarView> {
                 ? null
                 : [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.12),
+                      color: Colors.black.withValues(alpha: 0.12),
                       blurRadius: 2,
                       offset: const Offset(0, 1),
                     ),
@@ -482,18 +508,74 @@ class _CalendarViewState extends State<CalendarView> {
             },
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: 2.0, 
+                horizontal: 3.0, 
                 vertical: cardHeight < 12.0 ? 0.0 : 1.0
               ),
               child: cardHeight < 14.0 
-                  ? const SizedBox.shrink() // 💡 如果高度小于 14px，不渲染文字只展示颜色条，避免挤压盖住下层卡片
-                  : (useVerticalLayout
-                      ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, provider)
-                      : _buildHorizontalLayout(activity, startTime, endTime, cardHeight, provider)),
+                  ? const SizedBox.shrink() // 💡 高度极端小，仅保留颜色展示条
+                  : (cardHeight < 38.0 
+                      // 💡 关键修改：当卡片高度只够显示一行时（< 38px），使用单行并行布局！
+                      ? _buildSingleLineLayout(activity, startTime, endTime, provider)
+                      : (useVerticalLayout
+                          ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, provider)
+                          : _buildHorizontalLayout(activity, startTime, endTime, cardHeight, provider))),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  // 💡 新增：专门处理高度较小的单行极简卡片布局
+  // 💡 优化：极简单行卡片，同时展示【分类名称】+【完整时间段】
+  Widget _buildSingleLineLayout(
+    ActivityLog activity,
+    DateTime startTime,
+    DateTime endTime,
+    ActivityProvider provider,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                // 1. 分类名称
+                TextSpan(
+                  text: activity.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 10,
+                  ),
+                ),
+                // 2. 完整时间段 (如: 10:00 AM - 11:30 AM)
+                TextSpan(
+                  text: '       ${_formatTime(startTime)} - ${_formatTime(endTime)}',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.normal,
+                    fontSize: 8.5, // 适当缩减字号避免宽度溢出
+                  ),
+                ),
+              ],
+            ),
+            overflow: TextOverflow.ellipsis, // 实在太长时结尾自动变 ...
+            maxLines: 1,
+          ),
+        ),
+        const SizedBox(width: 2),
+        // 3. 删除按钮
+        GestureDetector(
+          onTap: () => _safeDeleteActivity(provider, activity),
+          child: const Icon(
+            Icons.close,
+            size: 11,
+            color: Colors.white70,
+          ),
+        ),
+      ],
     );
   }
 
@@ -543,7 +625,7 @@ class _CalendarViewState extends State<CalendarView> {
           ),
         ),
         GestureDetector(
-          onTap: () => _safeDeleteActivity(provider, activity.id),
+          onTap: () => _safeDeleteActivity(provider, activity),
           child: const Icon(
             Icons.close,
             size: 13,
@@ -582,7 +664,7 @@ class _CalendarViewState extends State<CalendarView> {
               ),
             ),
             GestureDetector(
-              onTap: () => _safeDeleteActivity(provider, activity.id),
+              onTap: () => _safeDeleteActivity(provider, activity),
               child: const Icon(
                 Icons.close,
                 size: 11,

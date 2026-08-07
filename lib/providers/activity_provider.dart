@@ -103,18 +103,16 @@ class ActivityProvider with ChangeNotifier {
       notifyListeners();
       await DatabaseHelper.instance.updateCategory(category);
 
-      // 💡 联动更新：找到所有使用旧分类名称/颜色的 ActivityLog，更新它们的 title 和 color
+      // 💡 关键修复：去掉 || 颜色匹配！只通过旧分类名称（oldCategory.name）来精确寻找关联的日志
       for (var i = 0; i < _activities.length; i++) {
-        if (_activities[i].title == oldCategory.name || 
-            _activities[i].color.toARGB32() == oldCategory.color.toARGB32()) {
-          
+        if (_activities[i].title == oldCategory.name) {
           final updatedLog = ActivityLog(
             id: _activities[i].id,
-            title: category.name,
+            title: category.name,     // 更新为新名字
             startTime: _activities[i].startTime,
             endTime: _activities[i].endTime,
             description: _activities[i].description,
-            color: category.color,
+            color: category.color,     // 同步更新为新颜色
           );
 
           _activities[i] = updatedLog;
@@ -122,7 +120,7 @@ class ActivityProvider with ChangeNotifier {
         }
       }
 
-      notifyListeners();
+      notifyListeners(); // 刷新 Calendar 和 Statistics 视图
     }
   }
 
@@ -137,10 +135,9 @@ class ActivityProvider with ChangeNotifier {
     _categories.removeAt(index);
     await DatabaseHelper.instance.deleteCategory(id);
 
-    // 2. 找到所有属于该 Category 的 ActivityLog 并清空
+    // 💡 关键修复：仅匹配 title == targetCategory.name，防止误杀同颜色的无关卡片
     final logsToRemove = _activities.where((a) =>
-        a.title.toLowerCase() == targetCategory.name.toLowerCase() ||
-        a.color.toARGB32() == targetCategory.color.toARGB32()).toList();
+        a.title.toLowerCase() == targetCategory.name.toLowerCase()).toList();
 
     for (var log in logsToRemove) {
       _activities.removeWhere((a) => a.id == log.id);
