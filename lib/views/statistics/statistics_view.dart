@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../models/activity_log.dart';
 import '../../providers/activity_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../../models/activity_category.dart';
 
 // 支持 Day, Week, Month, Year, All
@@ -20,8 +21,10 @@ class StatisticsView extends StatefulWidget {
 }
 
 class _StatisticsViewState extends State<StatisticsView> {
-  TimeRange _selectedRange = TimeRange.byMonth;
   ChartMode _chartMode = ChartMode.loggedTime; // 默认：Logged Time
+
+  // 💡 新增：记录被隐藏的分类名称集合
+  final Set<String> _hiddenCategoryNames = {};
 
   static const int _basePageOffset = 10000;
   final PageController _pageController =
@@ -35,17 +38,17 @@ class _StatisticsViewState extends State<StatisticsView> {
   }
 
   // 获取当前 Page 对应的基准时间
-  DateTime _getAnchorDateForPage(int pageIndex) {
+  DateTime _getAnchorDateForPage(int pageIndex, TimeRange selectedRange) {
     final offset = pageIndex - _basePageOffset;
     final now = DateTime.now();
 
-    if (_selectedRange == TimeRange.byDay) {
+    if (selectedRange == TimeRange.byDay) {
       return DateTime(now.year, now.month, now.day + offset);
-    } else if (_selectedRange == TimeRange.byWeek) {
+    } else if (selectedRange == TimeRange.byWeek) {
       return now.add(Duration(days: offset * 7));
-    } else if (_selectedRange == TimeRange.byMonth) {
+    } else if (selectedRange == TimeRange.byMonth) {
       return DateTime(now.year, now.month + offset, 1);
-    } else if (_selectedRange == TimeRange.byYear) {
+    } else if (selectedRange == TimeRange.byYear) {
       return DateTime(now.year + offset, 1, 1);
     } else {
       return now;
@@ -53,16 +56,16 @@ class _StatisticsViewState extends State<StatisticsView> {
   }
 
   // 生成顶部日期标题
-  String _getDateRangeTitle(DateTime anchorDate) {
+  String _getDateRangeTitle(DateTime anchorDate, TimeRange selectedRange) {
     final months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
 
-    if (_selectedRange == TimeRange.byDay) {
+    if (selectedRange == TimeRange.byDay) {
       final weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return '${weekDays[anchorDate.weekday - 1]}, ${months[anchorDate.month - 1]} ${anchorDate.day}, ${anchorDate.year}';
-    } else if (_selectedRange == TimeRange.byWeek) {
+    } else if (selectedRange == TimeRange.byWeek) {
       final weekStart =
           anchorDate.subtract(Duration(days: anchorDate.weekday - 1));
       final weekEnd = weekStart.add(const Duration(days: 6));
@@ -72,13 +75,13 @@ class _StatisticsViewState extends State<StatisticsView> {
       } else {
         return '${months[weekStart.month - 1]} ${weekStart.day} - ${months[weekEnd.month - 1]} ${weekEnd.day}, ${weekStart.year}';
       }
-    } else if (_selectedRange == TimeRange.byMonth) {
+    } else if (selectedRange == TimeRange.byMonth) {
       final fullMonths = [
         'January', 'February', 'March', 'April', 'May', 'June',
         'July', 'August', 'September', 'October', 'November', 'December'
       ];
       return '${fullMonths[anchorDate.month - 1]} ${anchorDate.year}';
-    } else if (_selectedRange == TimeRange.byYear) {
+    } else if (selectedRange == TimeRange.byYear) {
       return '${anchorDate.year}';
     } else {
       return 'All Time History';
@@ -86,20 +89,23 @@ class _StatisticsViewState extends State<StatisticsView> {
   }
 
   // 计算固定客观总时长 (Objective Time)
-  int _calculateObjectiveMinutes(DateTime anchorDate, List<ActivityLog> activities) {
-    if (_selectedRange == TimeRange.byDay) {
-      return 24 * 60; // 严格固定 24h (1440m)
-    } else if (_selectedRange == TimeRange.byWeek) {
-      return 7 * 24 * 60; // 严格固定 168h
-    } else if (_selectedRange == TimeRange.byMonth) {
+  int _calculateObjectiveMinutes(
+      DateTime anchorDate, TimeRange selectedRange, List<ActivityLog> activities) {
+    if (selectedRange == TimeRange.byDay) {
+      return 24 * 60;
+    } else if (selectedRange == TimeRange.byWeek) {
+      return 7 * 24 * 60;
+    } else if (selectedRange == TimeRange.byMonth) {
       final daysInMonth = DateTime(anchorDate.year, anchorDate.month + 1, 0).day;
       return daysInMonth * 24 * 60;
-    } else if (_selectedRange == TimeRange.byYear) {
-      final isLeapYear = (anchorDate.year % 4 == 0 && anchorDate.year % 100 != 0) || (anchorDate.year % 400 == 0);
+    } else if (selectedRange == TimeRange.byYear) {
+      final isLeapYear = (anchorDate.year % 4 == 0 && anchorDate.year % 100 != 0) ||
+          (anchorDate.year % 400 == 0);
       return (isLeapYear ? 366 : 365) * 24 * 60;
     } else {
       if (activities.isEmpty) return 24 * 60;
-      final earliest = activities.map((a) => a.startTime).reduce((a, b) => a.isBefore(b) ? a : b);
+      final earliest =
+          activities.map((a) => a.startTime).reduce((a, b) => a.isBefore(b) ? a : b);
       final days = DateTime.now().difference(earliest).inDays + 1;
       return days * 24 * 60;
     }
@@ -109,24 +115,25 @@ class _StatisticsViewState extends State<StatisticsView> {
   Map<String, _CategoryStats> _calculateStatsForPage(
       List<ActivityLog> activities,
       List<ActivityCategory> categories,
-      DateTime anchorDate) {
+      DateTime anchorDate,
+      TimeRange selectedRange) {
     final Map<String, _CategoryStats> statsMap = {};
 
     DateTime? windowStart;
     DateTime? windowEnd;
 
-    if (_selectedRange == TimeRange.byDay) {
+    if (selectedRange == TimeRange.byDay) {
       windowStart = DateTime(anchorDate.year, anchorDate.month, anchorDate.day, 0, 0, 0);
       windowEnd = windowStart.add(const Duration(days: 1));
-    } else if (_selectedRange == TimeRange.byWeek) {
+    } else if (selectedRange == TimeRange.byWeek) {
       final weekStart =
           anchorDate.subtract(Duration(days: anchorDate.weekday - 1));
       windowStart = DateTime(weekStart.year, weekStart.month, weekStart.day);
       windowEnd = windowStart.add(const Duration(days: 7));
-    } else if (_selectedRange == TimeRange.byMonth) {
+    } else if (selectedRange == TimeRange.byMonth) {
       windowStart = DateTime(anchorDate.year, anchorDate.month, 1);
       windowEnd = DateTime(anchorDate.year, anchorDate.month + 1, 1);
-    } else if (_selectedRange == TimeRange.byYear) {
+    } else if (selectedRange == TimeRange.byYear) {
       windowStart = DateTime(anchorDate.year, 1, 1);
       windowEnd = DateTime(anchorDate.year + 1, 1, 1);
     } else {
@@ -197,10 +204,13 @@ class _StatisticsViewState extends State<StatisticsView> {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<ActivityProvider>(context);
+    final settingsProvider = Provider.of<SettingsProvider>(context);
+
+    final selectedRange = settingsProvider.timeRange;
     final activities = provider.activities;
     final categories = provider.categories;
 
-    final currentAnchorDate = _getAnchorDateForPage(_currentPageIndex);
+    final currentAnchorDate = _getAnchorDateForPage(_currentPageIndex, selectedRange);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
@@ -227,15 +237,20 @@ class _StatisticsViewState extends State<StatisticsView> {
                   physics: const BouncingScrollPhysics(),
                   child: Row(
                     children: [
-                      _buildTimeRangeButton(TimeRange.byDay, 'By Day'),
+                      _buildTimeRangeButton(
+                          TimeRange.byDay, 'By Day', selectedRange, settingsProvider),
                       const SizedBox(width: 8),
-                      _buildTimeRangeButton(TimeRange.byWeek, 'By Week'),
+                      _buildTimeRangeButton(
+                          TimeRange.byWeek, 'By Week', selectedRange, settingsProvider),
                       const SizedBox(width: 8),
-                      _buildTimeRangeButton(TimeRange.byMonth, 'By Month'),
+                      _buildTimeRangeButton(
+                          TimeRange.byMonth, 'By Month', selectedRange, settingsProvider),
                       const SizedBox(width: 8),
-                      _buildTimeRangeButton(TimeRange.byYear, 'By Year'),
+                      _buildTimeRangeButton(
+                          TimeRange.byYear, 'By Year', selectedRange, settingsProvider),
                       const SizedBox(width: 8),
-                      _buildTimeRangeButton(TimeRange.all, 'All Time'),
+                      _buildTimeRangeButton(
+                          TimeRange.all, 'All Time', selectedRange, settingsProvider),
                     ],
                   ),
                 ),
@@ -248,11 +263,11 @@ class _StatisticsViewState extends State<StatisticsView> {
                     IconButton(
                       icon: Icon(
                         Icons.chevron_left,
-                        color: _selectedRange == TimeRange.all
+                        color: selectedRange == TimeRange.all
                             ? Colors.black26
                             : Colors.black87,
                       ),
-                      onPressed: _selectedRange == TimeRange.all
+                      onPressed: selectedRange == TimeRange.all
                           ? null
                           : () {
                               if (_pageController.hasClients) {
@@ -264,7 +279,7 @@ class _StatisticsViewState extends State<StatisticsView> {
                             },
                     ),
                     Text(
-                      _getDateRangeTitle(currentAnchorDate),
+                      _getDateRangeTitle(currentAnchorDate, selectedRange),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
@@ -274,11 +289,11 @@ class _StatisticsViewState extends State<StatisticsView> {
                     IconButton(
                       icon: Icon(
                         Icons.chevron_right,
-                        color: _selectedRange == TimeRange.all
+                        color: selectedRange == TimeRange.all
                             ? Colors.black26
                             : Colors.black87,
                       ),
-                      onPressed: _selectedRange == TimeRange.all
+                      onPressed: selectedRange == TimeRange.all
                           ? null
                           : () {
                               if (_pageController.hasClients) {
@@ -297,7 +312,7 @@ class _StatisticsViewState extends State<StatisticsView> {
           Expanded(
             child: PageView.builder(
               controller: _pageController,
-              physics: _selectedRange == TimeRange.all
+              physics: selectedRange == TimeRange.all
                   ? const NeverScrollableScrollPhysics()
                   : const BouncingScrollPhysics(),
               onPageChanged: (index) {
@@ -306,19 +321,33 @@ class _StatisticsViewState extends State<StatisticsView> {
                 });
               },
               itemBuilder: (context, pageIndex) {
-                final pageAnchorDate = _getAnchorDateForPage(pageIndex);
+                final pageAnchorDate =
+                    _getAnchorDateForPage(pageIndex, selectedRange);
                 final statsMap = _calculateStatsForPage(
-                    activities, categories, pageAnchorDate);
-                final statsList = statsMap.values.toList()
+                    activities, categories, pageAnchorDate, selectedRange);
+                
+                // 所有有记录的分类列表
+                final allStatsList = statsMap.values.toList()
                   ..sort((a, b) => b.totalDuration.compareTo(a.totalDuration));
 
-                final totalMinutesAll = statsList.fold<int>(
+                // 💡 过滤出未隐藏的分类（用于图表展示和分母计算）
+                final activeStatsList = allStatsList
+                    .where((s) => !_hiddenCategoryNames.contains(s.category.name))
+                    .toList();
+
+                // 💡 重新计算仅来自未隐藏分类的总时长与 sessions
+                final totalMinutesActive = activeStatsList.fold<int>(
                     0, (sum, item) => sum + item.totalDuration.inMinutes);
+                final totalSessionsActive = activeStatsList.fold<int>(
+                    0, (sum, item) => sum + item.count);
+
+                final objectiveMinutes =
+                    _calculateObjectiveMinutes(pageAnchorDate, selectedRange, activities);
                 
-                final objectiveMinutes = _calculateObjectiveMinutes(pageAnchorDate, activities);
+                // 计算占比用的分母（仅计算未隐藏分类的真实总时长）
                 final denominator = _chartMode == ChartMode.objectiveTime
                     ? objectiveMinutes
-                    : (totalMinutesAll > 0 ? totalMinutesAll : 1);
+                    : (totalMinutesActive > 0 ? totalMinutesActive : 1);
 
                 return SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
@@ -327,7 +356,7 @@ class _StatisticsViewState extends State<StatisticsView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 3. 统计汇总 Card
+                      // 3. 统计汇总 Card (仅展示未隐藏分类数据)
                       Container(
                         padding: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
@@ -348,7 +377,7 @@ class _StatisticsViewState extends State<StatisticsView> {
                                 children: [
                                   Text(
                                     _formatDuration(
-                                        Duration(minutes: totalMinutesAll)),
+                                        Duration(minutes: totalMinutesActive)),
                                     style: const TextStyle(
                                       color: Color(0xFF1A73E8),
                                       fontSize: 22,
@@ -372,7 +401,7 @@ class _StatisticsViewState extends State<StatisticsView> {
                               child: Column(
                                 children: [
                                   Text(
-                                    '${statsList.fold<int>(0, (sum, i) => sum + i.count)}',
+                                    '$totalSessionsActive',
                                     style: const TextStyle(
                                       color: Colors.black87,
                                       fontSize: 22,
@@ -413,8 +442,10 @@ class _StatisticsViewState extends State<StatisticsView> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                _buildModeToggleBtn('Logged Time', ChartMode.loggedTime),
-                                _buildModeToggleBtn('Objective Time', ChartMode.objectiveTime),
+                                _buildModeToggleBtn(
+                                    'Logged Time', ChartMode.loggedTime),
+                                _buildModeToggleBtn(
+                                    'Objective Time', ChartMode.objectiveTime),
                               ],
                             ),
                           ),
@@ -422,7 +453,7 @@ class _StatisticsViewState extends State<StatisticsView> {
                       ),
                       const SizedBox(height: 12),
 
-                      if (statsList.isEmpty)
+                      if (allStatsList.isEmpty)
                         Container(
                           height: 180,
                           alignment: Alignment.center,
@@ -432,74 +463,134 @@ class _StatisticsViewState extends State<StatisticsView> {
                           ),
                         )
                       else ...[
-                        // 💡 双视图智能切换：Logged Time 选饼图，Objective Time 选树状进度条
-                        if (_chartMode == ChartMode.loggedTime)
-                          _buildRadialDonutChart(statsList, totalMinutesAll, denominator)
+                        // 💡 只有未隐藏的分类才会绘制在图表上
+                        if (activeStatsList.isEmpty)
+                          Container(
+                            height: 180,
+                            alignment: Alignment.center,
+                            child: const Text(
+                              'All categories hidden.',
+                              style: TextStyle(color: Colors.grey, fontSize: 14),
+                            ),
+                          )
+                        else if (_chartMode == ChartMode.loggedTime)
+                          _buildRadialDonutChart(
+                              activeStatsList, totalMinutesActive, denominator)
                         else
-                          _buildObjectiveTimeBars(statsList, totalMinutesAll, objectiveMinutes),
+                          _buildObjectiveTimeBars(
+                              activeStatsList, totalMinutesActive, objectiveMinutes),
 
                         const SizedBox(height: 16),
 
-                        // 5. 分类明细列表
+                        // 5. 分类明细列表（展示所有分类，包含眼睛开/关按钮与淡化显示）
                         ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: statsList.length,
+                          itemCount: allStatsList.length,
                           separatorBuilder: (context, index) =>
                               const SizedBox(height: 8),
                           itemBuilder: (context, index) {
-                            final stat = statsList[index];
-                            final percentage = (stat.totalDuration.inMinutes / denominator) * 100;
+                            final stat = allStatsList[index];
+                            final isHidden = _hiddenCategoryNames.contains(stat.category.name);
+                            final percentage = isHidden
+                                ? 0.0
+                                : (stat.totalDuration.inMinutes / denominator) * 100;
 
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16.0, vertical: 12.0),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12.0),
-                                border: Border.all(color: Colors.grey.shade200),
-                              ),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: stat.category.color,
-                                    child: Icon(stat.category.icon,
-                                        color: Colors.white, size: 18),
+                            return AnimatedOpacity(
+                              duration: const Duration(milliseconds: 200),
+                              opacity: isHidden ? 0.45 : 1.0, // 💡 隐藏后变浅半透明
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16.0, vertical: 10.0),
+                                decoration: BoxDecoration(
+                                  color: isHidden ? Colors.grey.shade100 : Colors.white,
+                                  borderRadius: BorderRadius.circular(12.0),
+                                  border: Border.all(
+                                    color: isHidden
+                                        ? Colors.grey.shade300
+                                        : Colors.grey.shade200,
                                   ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          stat.category.name,
-                                          style: const TextStyle(
-                                            color: Colors.black87,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
+                                ),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 18,
+                                      backgroundColor: isHidden
+                                          ? Colors.grey.shade400
+                                          : stat.category.color,
+                                      child: Icon(stat.category.icon,
+                                          color: Colors.white, size: 18),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            stat.category.name,
+                                            style: TextStyle(
+                                              color: isHidden
+                                                  ? Colors.black45
+                                                  : Colors.black87,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                              decoration: isHidden
+                                                  ? TextDecoration.lineThrough
+                                                  : null,
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          '${stat.count} session${stat.count > 1 ? 's' : ''} • ${percentage.toStringAsFixed(1)}%',
-                                          style: const TextStyle(
-                                              color: Colors.black54,
-                                              fontSize: 11),
-                                        ),
-                                      ],
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            isHidden
+                                                ? 'Hidden from stats'
+                                                : '${stat.count} session${stat.count > 1 ? 's' : ''} • ${percentage.toStringAsFixed(1)}%',
+                                            style: TextStyle(
+                                                color: isHidden
+                                                    ? Colors.black38
+                                                    : Colors.black54,
+                                                fontSize: 11),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  Text(
-                                    _formatDuration(stat.totalDuration),
-                                    style: const TextStyle(
-                                      color: Colors.black87,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
+                                    Text(
+                                      _formatDuration(stat.totalDuration),
+                                      style: TextStyle(
+                                        color: isHidden
+                                            ? Colors.black45
+                                            : Colors.black87,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+
+                                    // 💡 眼睛图标控制隐藏/显示
+                                    IconButton(
+                                      icon: Icon(
+                                        isHidden
+                                            ? Icons.visibility_off_outlined
+                                            : Icons.visibility_outlined,
+                                        size: 20,
+                                        color: isHidden
+                                            ? Colors.grey.shade500
+                                            : const Color(0xFF1A73E8),
+                                      ),
+                                      onPressed: () {
+                                        setState(() {
+                                          if (isHidden) {
+                                            _hiddenCategoryNames
+                                                .remove(stat.category.name);
+                                          } else {
+                                            _hiddenCategoryNames
+                                                .add(stat.category.name);
+                                          }
+                                        });
+                                      },
+                                    ),
+                                  ],
+                                ),
                               ),
                             );
                           },
@@ -528,7 +619,10 @@ class _StatisticsViewState extends State<StatisticsView> {
           color: isSelected ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(6.0),
           boxShadow: isSelected
-              ? [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)]
+              ? [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)
+                ]
               : null,
         ),
         child: Text(
@@ -543,11 +637,11 @@ class _StatisticsViewState extends State<StatisticsView> {
     );
   }
 
-  // 💡 客观时间 - 树状/柱状占比图 (Objective Time Progress Bars)
+  // 客观时间 - 树状/柱状占比图
   Widget _buildObjectiveTimeBars(
-      List<_CategoryStats> statsList, int totalMinutesAll, int objectiveMinutes) {
-    final unloggedMinutes = max(0, objectiveMinutes - totalMinutesAll);
-    final totalLoggedPct = (totalMinutesAll / objectiveMinutes) * 100;
+      List<_CategoryStats> statsList, int totalMinutesActive, int objectiveMinutes) {
+    final unloggedMinutes = max(0, objectiveMinutes - totalMinutesActive);
+    final totalLoggedPct = (totalMinutesActive / objectiveMinutes) * 100;
 
     return Container(
       padding: const EdgeInsets.all(16.0),
@@ -563,7 +657,7 @@ class _StatisticsViewState extends State<StatisticsView> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Logged ${_formatDuration(Duration(minutes: totalMinutesAll))} of ${_formatDuration(Duration(minutes: objectiveMinutes))}',
+                'Logged ${_formatDuration(Duration(minutes: totalMinutesActive))} of ${_formatDuration(Duration(minutes: objectiveMinutes))}',
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
@@ -620,7 +714,8 @@ class _StatisticsViewState extends State<StatisticsView> {
             itemBuilder: (context, index) {
               final stat = statsList[index];
               final pct = (stat.totalDuration.inMinutes / objectiveMinutes) * 100;
-              final barRatio = (stat.totalDuration.inMinutes / objectiveMinutes).clamp(0.0, 1.0);
+              final barRatio =
+                  (stat.totalDuration.inMinutes / objectiveMinutes).clamp(0.0, 1.0);
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -679,9 +774,9 @@ class _StatisticsViewState extends State<StatisticsView> {
     );
   }
 
-  // 💡 已记录时间 - 饼图视图 (Donut Chart)
+  // 已记录时间 - 饼图视图 (Donut Chart)
   Widget _buildRadialDonutChart(
-      List<_CategoryStats> statsList, int totalMinutesAll, int denominator) {
+      List<_CategoryStats> statsList, int totalMinutesActive, int denominator) {
     return SizedBox(
       height: 280,
       width: double.infinity,
@@ -692,10 +787,10 @@ class _StatisticsViewState extends State<StatisticsView> {
           const donutOuterRadius = 66.0;
           const lineLength = 24.0;
 
-          // 过滤占比 >= 1% 的分类生成引线
           final visibleStats = statsList.where((stat) {
-            final percentage = (stat.totalDuration.inMinutes / denominator) * 100;
-            return percentage >= 1.0; 
+            final percentage =
+                (stat.totalDuration.inMinutes / denominator) * 100;
+            return percentage >= 1.0;
           }).toList();
 
           double currentAngle = -90.0;
@@ -703,10 +798,11 @@ class _StatisticsViewState extends State<StatisticsView> {
 
           for (var stat in statsList) {
             final sweep = (stat.totalDuration.inMinutes /
-                    (totalMinutesAll > 0 ? totalMinutesAll : 1)) *
+                    (totalMinutesActive > 0 ? totalMinutesActive : 1)) *
                 360.0;
-            
-            final percentage = (stat.totalDuration.inMinutes / denominator) * 100;
+
+            final percentage =
+                (stat.totalDuration.inMinutes / denominator) * 100;
 
             if (percentage >= 1.0) {
               rawAngles.add(currentAngle + sweep / 2.0);
@@ -737,7 +833,8 @@ class _StatisticsViewState extends State<StatisticsView> {
             final rawRad = rawAngles[i] * (pi / 180.0);
             final adjRad = adjustedAngles[i] * (pi / 180.0);
 
-            final percentage = (stat.totalDuration.inMinutes / denominator) * 100;
+            final percentage =
+                (stat.totalDuration.inMinutes / denominator) * 100;
 
             final p1 = Offset(
               center.dx + donutOuterRadius * cos(rawRad),
@@ -834,13 +931,19 @@ class _StatisticsViewState extends State<StatisticsView> {
     );
   }
 
-  Widget _buildTimeRangeButton(TimeRange range, String label) {
-    final isSelected = _selectedRange == range;
+  Widget _buildTimeRangeButton(
+    TimeRange range,
+    String label,
+    TimeRange currentSelectedRange,
+    SettingsProvider settingsProvider,
+  ) {
+    final isSelected = currentSelectedRange == range;
     return GestureDetector(
       onTap: () {
-        if (_selectedRange != range) {
+        if (currentSelectedRange != range) {
+          settingsProvider.setTimeRange(range);
+
           setState(() {
-            _selectedRange = range;
             _currentPageIndex = _basePageOffset;
           });
 

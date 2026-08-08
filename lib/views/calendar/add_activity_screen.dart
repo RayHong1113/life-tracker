@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/activity_log.dart';
-import '../../models/activity_category.dart'; // 💡 补上缺失的 Category Model 导入
+import '../../models/activity_category.dart';
 import '../../providers/activity_provider.dart';
 
 class AddActivityScreen extends StatefulWidget {
   final DateTime selectedDate;
   final int? initialHour;
+  final DateTime? initialStartTime;
   final ActivityLog? existingActivity;
 
   const AddActivityScreen({
     super.key,
     required this.selectedDate,
     this.initialHour,
+    this.initialStartTime,
     this.existingActivity,
   });
 
@@ -34,23 +36,51 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
   void initState() {
     super.initState();
     final isEditing = widget.existingActivity != null;
-    final targetHour = widget.initialHour ?? DateTime.now().hour;
+    final now = DateTime.now();
 
     _notesController = TextEditingController(
         text: isEditing ? widget.existingActivity!.description : '');
 
-    _startDate = isEditing ? widget.existingActivity!.startTime : widget.selectedDate;
-    _startTimeOfDay = isEditing
-        ? TimeOfDay.fromDateTime(widget.existingActivity!.startTime)
-        : TimeOfDay(hour: targetHour, minute: 0);
+    if (isEditing) {
+      final activity = widget.existingActivity!;
+      _startDate = activity.startTime;
+      _startTimeOfDay = TimeOfDay.fromDateTime(activity.startTime);
 
-    _endDate = isEditing
-        ? (widget.existingActivity!.endTime ?? _startDate.add(const Duration(hours: 1)))
-        : _startDate;
-    _endTimeOfDay = isEditing
-        ? TimeOfDay.fromDateTime(widget.existingActivity!.endTime ??
-            widget.existingActivity!.startTime.add(const Duration(hours: 1)))
-        : TimeOfDay(hour: (targetHour + 1) % 24, minute: 0);
+      final end = activity.endTime ?? activity.startTime.add(const Duration(hours: 1));
+      _endDate = end;
+      _endTimeOfDay = TimeOfDay.fromDateTime(end);
+    } else {
+      final targetHour = widget.initialHour ?? now.hour;
+      final targetMinute = widget.initialStartTime?.minute ?? 0;
+
+      _startDate = widget.selectedDate;
+      _startTimeOfDay = TimeOfDay(hour: targetHour, minute: targetMinute);
+
+      _endDate = DateTime(now.year, now.month, now.day);
+      _endTimeOfDay = TimeOfDay.fromDateTime(now);
+
+      final startDateTime = DateTime(
+        _startDate.year,
+        _startDate.month,
+        _startDate.day,
+        _startTimeOfDay.hour,
+        _startTimeOfDay.minute,
+      );
+
+      final endDateTime = DateTime(
+        _endDate.year,
+        _endDate.month,
+        _endDate.day,
+        _endTimeOfDay.hour,
+        _endTimeOfDay.minute,
+      );
+
+      if (endDateTime.isBefore(startDateTime)) {
+        final adjustedEnd = startDateTime.add(const Duration(minutes: 15));
+        _endDate = DateTime(adjustedEnd.year, adjustedEnd.month, adjustedEnd.day);
+        _endTimeOfDay = TimeOfDay.fromDateTime(adjustedEnd);
+      }
+    }
   }
 
   @override
@@ -76,6 +106,44 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
     );
   }
 
+  /// 💡 低调小巧的精致 SnackBar 提示框
+  void _showLightSnackBar(String message) {
+    if (!mounted) return;
+    
+    // 先清理上一次的提示，防止快速点击时排队弹窗
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white70, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating, // 💡 1. 悬浮模式（非拉满全宽）
+        elevation: 2.0,
+        backgroundColor: const Color(0xFF323F4B), // 💡 2. 柔和不刺眼的深灰蓝底色
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24.0), // 💡 3. 圆角胶囊形状
+        ),
+        margin: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 16.0), // 💡 4. 左右缩进，显得精致小巧
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   void _saveActivity(List<ActivityCategory> categories) async {
     if (categories.isEmpty) return;
     
@@ -89,7 +157,7 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       _startTimeOfDay.minute,
     );
 
-    DateTime endDateTime = DateTime(
+    final endDateTime = DateTime(
       _endDate.year,
       _endDate.month,
       _endDate.day,
@@ -97,8 +165,10 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       _endTimeOfDay.minute,
     );
 
-    if (endDateTime.isBefore(startDateTime) || endDateTime.isAtSameMomentAs(startDateTime)) {
-      endDateTime = endDateTime.add(const Duration(days: 1));
+    // 保存前的合法性判定
+    if (endDateTime.isBefore(startDateTime)) {
+      _showLightSnackBar('End time cannot be earlier than start time');
+      return;
     }
 
     final isEditing = widget.existingActivity != null;
@@ -224,7 +294,9 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                     if (picked != null) {
                                       setState(() {
                                         _startDate = picked;
-                                        if (_endDate.isBefore(_startDate)) _endDate = _startDate;
+                                        if (_endDate.isBefore(_startDate)) {
+                                          _endDate = _startDate;
+                                        }
                                       });
                                     }
                                   },
@@ -234,7 +306,11 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                   style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                                   onPressed: () async {
                                     final time = await _pickTime(_startTimeOfDay);
-                                    if (time != null) setState(() => _startTimeOfDay = time);
+                                    if (time != null) {
+                                      setState(() {
+                                        _startTimeOfDay = time;
+                                      });
+                                    }
                                   },
                                   child: Text(_startTimeOfDay.format(context), style: const TextStyle(color: Colors.white, fontSize: 12)),
                                 ),
@@ -254,11 +330,13 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                   onPressed: () async {
                                     final picked = await showDatePicker(
                                       context: context,
-                                      initialDate: _endDate,
+                                      initialDate: _endDate.isBefore(_startDate) ? _startDate : _endDate,
                                       firstDate: _startDate,
                                       lastDate: DateTime(2030),
                                     );
-                                    if (picked != null) setState(() => _endDate = picked);
+                                    if (picked != null) {
+                                      setState(() => _endDate = picked);
+                                    }
                                   },
                                   child: Text(_formatDate(_endDate), style: const TextStyle(color: Colors.white, fontSize: 12)),
                                 ),
@@ -266,7 +344,17 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                   style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                                   onPressed: () async {
                                     final time = await _pickTime(_endTimeOfDay);
-                                    if (time != null) setState(() => _endTimeOfDay = time);
+                                    if (time != null) {
+                                      final newEndDT = DateTime(_endDate.year, _endDate.month, _endDate.day, time.hour, time.minute);
+                                      final startDT = DateTime(_startDate.year, _startDate.month, _startDate.day, _startTimeOfDay.hour, _startTimeOfDay.minute);
+
+                                      if (newEndDT.isBefore(startDT)) {
+                                        _showLightSnackBar('End time cannot be earlier than start time');
+                                        return;
+                                      }
+
+                                      setState(() => _endTimeOfDay = time);
+                                    }
                                   },
                                   child: Text(_endTimeOfDay.format(context), style: const TextStyle(color: Colors.white, fontSize: 12)),
                                 ),

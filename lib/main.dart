@@ -2,14 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/activity_provider.dart';
 import 'views/home/home_screen.dart';
+import 'providers/settings_provider.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  final settingsProvider = SettingsProvider();
+  await settingsProvider.loadSettings();
+  
+  // 💡 把加载好的 settingsProvider 传给 MyApp
+  runApp(MyApp(settingsProvider: settingsProvider));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final SettingsProvider settingsProvider;
+
+  const MyApp({super.key, required this.settingsProvider});
 
   @override
   Widget build(BuildContext context) {
@@ -17,6 +24,10 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(
           create: (_) => ActivityProvider()..fetchActivities(),
+        ),
+        // 💡 关键：将 settingsProvider 注册进 MultiProvider
+        ChangeNotifierProvider<SettingsProvider>.value(
+          value: settingsProvider,
         ),
       ],
       child: MaterialApp(

@@ -1,7 +1,7 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/activity_log.dart';
-import '../models/activity_category.dart'; // 💡 导入分类 Model
+import '../models/activity_category.dart';
 
 /// Singleton helper class to manage SQLite database operations.
 class DatabaseHelper {
@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3, // 💡 升到 Version 3
+      version: 4, // 💡 1. 升到 Version 4 (因为新增了 user_settings 表)
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -41,13 +41,21 @@ class DatabaseHelper {
       )
     ''');
 
-    // 💡 2. 新增 categories 表
+    // 2. 创建 categories 表
     await db.execute('''
       CREATE TABLE categories (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         icon_code INTEGER NOT NULL,
         color INTEGER NOT NULL
+      )
+    ''');
+
+    // 💡 3. 新建应用：在 _createDB 注册 user_settings 表
+    await db.execute('''
+      CREATE TABLE user_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
       )
     ''');
   }
@@ -60,6 +68,16 @@ class DatabaseHelper {
           name TEXT NOT NULL,
           icon_code INTEGER NOT NULL,
           color INTEGER NOT NULL
+        )
+      ''');
+    }
+
+    // 💡 4. 老用户升级：版本小于 4 时补充创建 user_settings 表
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS user_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT
         )
       ''');
     }
@@ -112,7 +130,7 @@ class DatabaseHelper {
     );
   }
 
-  // ==================== Category CRUD (💡 新增) ====================
+  // ==================== Category CRUD ====================
 
   Future<int> insertCategory(ActivityCategory category) async {
     final db = await instance.database;
@@ -146,5 +164,29 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // ==================== User Settings API (💡 规范方法) ====================
+
+  Future<void> saveSetting(String key, String value) async {
+    final db = await instance.database;
+    await db.insert(
+      'user_settings',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<String?> getSetting(String key) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'user_settings',
+      where: 'key = ?',
+      whereArgs: [key],
+    );
+    if (maps.isNotEmpty) {
+      return maps.first['value'] as String?;
+    }
+    return null;
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 💡 仅使用 Flutter 官方 SDK 的 services 包
 import 'package:provider/provider.dart';
 import '../../providers/activity_provider.dart';
 import '../calendar/calendar_view.dart';
@@ -36,24 +37,35 @@ class _HomeScreenState extends State<HomeScreen> {
               SettingsView(),   // 2: Settings
             ],
           ),
-          // 💡 紧凑小巧的底部导航栏主题配置
           bottomNavigationBar: NavigationBarTheme(
             data: NavigationBarThemeData(
-              height: 56, // 💡 压缩为 56px 的超窄高度
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow, // 💡 修正属性类型名称
-              iconTheme: WidgetStateProperty.all(
-                const IconThemeData(size: 20),
+              height: 56,
+              indicatorColor: const Color(0xFFE8F0FE), // 自定义选中的高亮胶囊颜色
+              overlayColor: WidgetStateProperty.all(
+                const Color(0xFF1A73E8).withValues(alpha: 0.12),
               ),
-              labelTextStyle: WidgetStateProperty.all(
-                const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-              ),
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+              iconTheme: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return const IconThemeData(size: 20, color: Color(0xFF1A73E8));
+                }
+                return const IconThemeData(size: 20, color: Colors.black54);
+              }),
+              labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1A73E8));
+                }
+                return const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.black54);
+              }),
             ),
             child: NavigationBar(
               selectedIndex: _currentTabIndex,
               onDestinationSelected: (index) {
-                setState(() {
-                  _currentTabIndex = index;
-                });
+                if (_currentTabIndex != index) {
+                  setState(() {
+                    _currentTabIndex = index;
+                  });
+                }
               },
               destinations: const [
                 NavigationDestination(

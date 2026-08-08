@@ -21,6 +21,7 @@ class CalendarView extends StatefulWidget {
 
 class _CalendarViewState extends State<CalendarView> {
   int? _selectedHour;
+  bool _isFullHourSelected = false;
 
   static const int _basePageOffset = 10000;
   final DateTime _initialDate = DateTime.now();
@@ -89,7 +90,7 @@ class _CalendarViewState extends State<CalendarView> {
                 text: activity.title,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: activity.color, // 💡 动态读取该卡片分类的颜色
+                  color: activity.color,
                 ),
               ),
               const TextSpan(text: '?'),
@@ -110,26 +111,64 @@ class _CalendarViewState extends State<CalendarView> {
       ),
     );
 
-    // 💡 只有在弹窗里点击了 Delete，才执行删除
     if (confirm == true) {
       await provider.deleteActivity(activity.id);
     }
   }
 
-  void _openAddOrEditActivityScreen(BuildContext context,
-      {required DateTime selectedDate,
-      int? initialHour,
-      ActivityLog? existingActivity}) {
+  void _openAddOrEditActivityScreen(
+    BuildContext context, {
+    required DateTime selectedDate,
+    int? initialHour,
+    int? initialMinute,
+    ActivityLog? existingActivity,
+  }) {
+    DateTime? customStartTime;
+    if (initialHour != null) {
+      customStartTime = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        initialHour,
+        initialMinute ?? 0,
+      );
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => AddActivityScreen(
           selectedDate: selectedDate,
           initialHour: initialHour,
+          initialStartTime: customStartTime,
           existingActivity: existingActivity,
         ),
       ),
     );
+  }
+
+  /// 💡 关键辅助函数：计算给定 hour 内被占用的最大分钟偏移量 (0~60)
+  int _getOccupiedMinutesInHour(int hour, List<ActivityLog> dayActivities) {
+    int maxEndMinute = 0;
+
+    for (var activity in dayActivities) {
+      final start = activity.startTime;
+      final end = activity.endTime ?? start.add(const Duration(hours: 1));
+
+      final hourStart = DateTime(start.year, start.month, start.day, hour, 0);
+      final hourEnd = DateTime(start.year, start.month, start.day, hour, 59, 59);
+
+      if (start.isBefore(hourEnd) && end.isAfter(hourStart)) {
+        if (end.hour > hour) {
+          maxEndMinute = 60;
+        } else if (end.hour == hour) {
+          if (end.minute > maxEndMinute) {
+            maxEndMinute = end.minute;
+          }
+        }
+      }
+    }
+    return maxEndMinute;
   }
 
   @override
@@ -193,7 +232,7 @@ class _CalendarViewState extends State<CalendarView> {
                                 children: [
                                   Column(
                                     children: List.generate(24, (hour) {
-                                      return _buildFixedHourCell(hour);
+                                      return _buildFixedHourCell(hour, pageActivities);
                                     }),
                                   ),
                                   ...positionedActivities.map((pos) {
@@ -221,8 +260,23 @@ class _CalendarViewState extends State<CalendarView> {
       floatingActionButton: FloatingActionButton(
         elevation: 2,
         backgroundColor: const Color(0xFF1A73E8),
-        onPressed: () => _openAddOrEditActivityScreen(context,
-            selectedDate: selectedDate, initialHour: _selectedHour),
+        onPressed: () async {
+          int? minuteOffset;
+          if (_selectedHour != null) {
+            final currentActivities = await provider.getActivitiesForDate(selectedDate);
+            final occupied = _getOccupiedMinutesInHour(_selectedHour!, currentActivities);
+            minuteOffset = occupied < 60 ? occupied : 0;
+          }
+
+          if (context.mounted) {
+            _openAddOrEditActivityScreen(
+              context,
+              selectedDate: selectedDate,
+              initialHour: _selectedHour,
+              initialMinute: minuteOffset,
+            );
+          }
+        },
         child: const Icon(Icons.add, color: Colors.white, size: 28),
       ),
     );
@@ -363,16 +417,22 @@ class _CalendarViewState extends State<CalendarView> {
     return sorted;
   }
 
-  Widget _buildFixedHourCell(int hour) {
+  Widget _buildFixedHourCell(int hour, List<ActivityLog> pageActivities) {
     final amPm = hour >= 12 ? 'PM' : 'AM';
     final formattedHour = hour % 12 == 0 ? 12 : hour % 12;
     final isSelected = _selectedHour == hour;
+
+    final occupiedMinutes = _getOccupiedMinutesInHour(hour, pageActivities);
+    
+    // 💡 关键：如果是全选模式或者没有占用，从 0 分钟开始；如果是点击右侧，从 occupiedMinutes 开始
+    final startMinute = (isSelected && _isFullHourSelected) ? 0 : (occupiedMinutes < 60 ? occupiedMinutes : 0);
 
     return SizedBox(
       height: _hourHeight,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // 💡 1. 左侧时间标尺：点击选择【整个小时段】
           SizedBox(
             width: _timeLabelWidth,
             child: InkWell(
@@ -380,6 +440,7 @@ class _CalendarViewState extends State<CalendarView> {
               onTap: () {
                 setState(() {
                   _selectedHour = hour;
+                  _isFullHourSelected = true; // 👈 标记为全选整个小时
                 });
               },
               child: Container(
@@ -397,49 +458,56 @@ class _CalendarViewState extends State<CalendarView> {
               ),
             ),
           ),
+
+          // 💡 2. 右侧空白区域：点击选择【剩余可用时间段】
           Expanded(
             child: InkWell(
               onTap: () {
                 setState(() {
                   _selectedHour = hour;
+                  _isFullHourSelected = false; // 👈 标记为智能切分剩余时间段
                 });
               },
-              child: Container(
-                margin: const EdgeInsets.symmetric(
-                  vertical: 1.0,
-                  horizontal: _cellHorizontalMargin,
-                ),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFE8F0FE) : Colors.white,
-                  borderRadius: BorderRadius.circular(6.0),
-                  border: Border.all(
-                    color: isSelected
-                        ? const Color(0xFF1A73E8)
-                        : Colors.grey.shade300,
-                    width: isSelected ? 1.5 : 1.0,
+              child: Stack(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.symmetric(
+                      vertical: 1.0,
+                      horizontal: _cellHorizontalMargin,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(6.0),
+                      border: Border.all(color: Colors.grey.shade300, width: 1.0),
+                    ),
                   ),
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                child: isSelected && _providerActivitiesIsEmpty()
-                    ? Text(
-                        'Tap + to add task at $formattedHour $amPm',
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF1A73E8)),
-                      )
-                    : null,
+                  if (isSelected && (occupiedMinutes < 60 || _isFullHourSelected)) ...[
+                    Positioned(
+                      top: (startMinute / 60.0) * _hourHeight + 1.0,
+                      bottom: 1.0,
+                      left: _cellHorizontalMargin,
+                      right: _cellHorizontalMargin,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F0FE),
+                          borderRadius: BorderRadius.circular(4.0),
+                          border: Border.all(
+                            color: const Color(0xFF1A73E8),
+                            width: 1.5,
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                        
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  bool _providerActivitiesIsEmpty() {
-    return Provider.of<ActivityProvider>(context, listen: false)
-        .activities
-        .isEmpty;
   }
 
   Widget _buildPositionedActivityCard(
@@ -512,9 +580,8 @@ class _CalendarViewState extends State<CalendarView> {
                 vertical: cardHeight < 12.0 ? 0.0 : 1.0
               ),
               child: cardHeight < 14.0 
-                  ? const SizedBox.shrink() // 💡 高度极端小，仅保留颜色展示条
+                  ? const SizedBox.shrink()
                   : (cardHeight < 38.0 
-                      // 💡 关键修改：当卡片高度只够显示一行时（< 38px），使用单行并行布局！
                       ? _buildSingleLineLayout(activity, startTime, endTime, provider)
                       : (useVerticalLayout
                           ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, provider)
@@ -526,8 +593,6 @@ class _CalendarViewState extends State<CalendarView> {
     );
   }
 
-  // 💡 新增：专门处理高度较小的单行极简卡片布局
-  // 💡 优化：极简单行卡片，同时展示【分类名称】+【完整时间段】
   Widget _buildSingleLineLayout(
     ActivityLog activity,
     DateTime startTime,
@@ -541,7 +606,6 @@ class _CalendarViewState extends State<CalendarView> {
           child: Text.rich(
             TextSpan(
               children: [
-                // 1. 分类名称
                 TextSpan(
                   text: activity.title,
                   style: const TextStyle(
@@ -550,23 +614,21 @@ class _CalendarViewState extends State<CalendarView> {
                     fontSize: 10,
                   ),
                 ),
-                // 2. 完整时间段 (如: 10:00 AM - 11:30 AM)
                 TextSpan(
                   text: '       ${_formatTime(startTime)} - ${_formatTime(endTime)}',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontWeight: FontWeight.normal,
-                    fontSize: 8.5, // 适当缩减字号避免宽度溢出
+                    fontSize: 8.5,
                   ),
                 ),
               ],
             ),
-            overflow: TextOverflow.ellipsis, // 实在太长时结尾自动变 ...
+            overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
         ),
         const SizedBox(width: 2),
-        // 3. 删除按钮
         GestureDetector(
           onTap: () => _safeDeleteActivity(provider, activity),
           child: const Icon(
