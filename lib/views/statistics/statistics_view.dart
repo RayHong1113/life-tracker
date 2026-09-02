@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../../models/activity_log.dart';
 import '../../providers/activity_provider.dart';
 import '../../providers/settings_provider.dart';
+import 'category_detail_screen.dart';
 import '../../models/activity_category.dart';
 
 // 支持 Day, Week, Month, Year, All
@@ -23,36 +24,56 @@ class StatisticsView extends StatefulWidget {
 class _StatisticsViewState extends State<StatisticsView> {
   ChartMode _chartMode = ChartMode.loggedTime; // 默认：Logged Time
 
-  // 💡 新增：记录被隐藏的分类名称集合
+  // 💡 记录被隐藏的分类名称集合
   final Set<String> _hiddenCategoryNames = {};
 
-  static const int _basePageOffset = 10000;
-  final PageController _pageController =
-      PageController(initialPage: _basePageOffset);
-  int _currentPageIndex = _basePageOffset;
+  PageController? _pageController;
+  int _currentIndex = 0;
+  TimeRange? _lastSelectedRange;
+  DateTime? _lastCalendarDate;
 
   @override
   void dispose() {
-    _pageController.dispose();
+    _pageController?.dispose();
     super.dispose();
   }
 
-  // 获取当前 Page 对应的基准时间
-  DateTime _getAnchorDateForPage(int pageIndex, TimeRange selectedRange) {
-    final offset = pageIndex - _basePageOffset;
-    final now = DateTime.now();
-
-    if (selectedRange == TimeRange.byDay) {
-      return DateTime(now.year, now.month, now.day + offset);
-    } else if (selectedRange == TimeRange.byWeek) {
-      return now.add(Duration(days: offset * 7));
-    } else if (selectedRange == TimeRange.byMonth) {
-      return DateTime(now.year, now.month + offset, 1);
-    } else if (selectedRange == TimeRange.byYear) {
-      return DateTime(now.year + offset, 1, 1);
-    } else {
-      return now;
+  DateTime _getPeriodAnchor(DateTime date, TimeRange selectedRange) {
+    final clean = DateTime(date.year, date.month, date.day);
+    switch (selectedRange) {
+      case TimeRange.byDay:
+        return clean;
+      case TimeRange.byWeek:
+        return clean.subtract(Duration(days: clean.weekday - 1));
+      case TimeRange.byMonth:
+        return DateTime(clean.year, clean.month, 1);
+      case TimeRange.byYear:
+        return DateTime(clean.year, 1, 1);
+      case TimeRange.all:
+        return DateTime(2026, 1, 1);
     }
+  }
+
+  // 💡 获取包含真实打卡记录、当前时间、Calendar 当前选中日期以及已访问日期的有效时间段
+  List<DateTime> _getAvailablePeriods(
+      List<ActivityLog> activities, TimeRange selectedRange, DateTime targetDate, DateTime? lastDate) {
+    final targetAnchor = _getPeriodAnchor(targetDate, selectedRange);
+    final nowAnchor = _getPeriodAnchor(DateTime.now(), selectedRange);
+
+    if (selectedRange == TimeRange.all) {
+      return [nowAnchor];
+    }
+
+    final Set<DateTime> periodSet = {nowAnchor, targetAnchor};
+    if (lastDate != null) {
+      periodSet.add(_getPeriodAnchor(lastDate, selectedRange));
+    }
+    for (var act in activities) {
+      periodSet.add(_getPeriodAnchor(act.startTime, selectedRange));
+    }
+
+    final list = periodSet.toList()..sort((a, b) => a.compareTo(b));
+    return list;
   }
 
   // 生成顶部日期标题
@@ -165,11 +186,9 @@ class _StatisticsViewState extends State<StatisticsView> {
       if (overlapDuration.inMinutes <= 0) continue;
 
       final category = categories.firstWhere(
-        (cat) =>
-            cat.name.toLowerCase() == activity.title.toLowerCase() ||
-            cat.color.toARGB32() == activity.color.toARGB32(),
+        (cat) => cat.name.trim().toLowerCase() == activity.title.trim().toLowerCase(),
         orElse: () => ActivityCategory(
-          id: 'default',
+          id: activity.title,
           name: activity.title,
           icon: Icons.task_alt,
           color: activity.color,
@@ -207,71 +226,136 @@ class _StatisticsViewState extends State<StatisticsView> {
     final settingsProvider = Provider.of<SettingsProvider>(context);
 
     final selectedRange = settingsProvider.timeRange;
+    final calendarDate = provider.selectedDate;
     final activities = provider.activities;
     final categories = provider.categories;
 
-    final currentAnchorDate = _getAnchorDateForPage(_currentPageIndex, selectedRange);
+    // 💡 1. 提取包含真实打卡记录、当前时间、Calendar 当前选中日期以及已访问日期的 Period 列表
+    final availablePeriods = _getAvailablePeriods(activities, selectedRange, calendarDate, _lastCalendarDate);
+
+    final targetAnchor = _getPeriodAnchor(calendarDate, selectedRange);
+    int matchedIdx = availablePeriods.indexWhere((p) => p == targetAnchor);
+    if (matchedIdx == -1) {
+      final nowAnchor = _getPeriodAnchor(DateTime.now(), selectedRange);
+      matchedIdx = availablePeriods.indexWhere((p) => p == nowAnchor);
+      if (matchedIdx == -1) {
+        matchedIdx = availablePeriods.length - 1;
+      }
+    }
+
+    final activeAnchor = _currentIndex < availablePeriods.length
+        ? availablePeriods[_currentIndex]
+        : null;
+
+    if (_pageController == null || _lastSelectedRange != selectedRange) {
+      _lastSelectedRange = selectedRange;
+      _lastCalendarDate = calendarDate;
+      _currentIndex = matchedIdx;
+      _pageController?.dispose();
+      _pageController = PageController(initialPage: _currentIndex);
+    } else if (_lastCalendarDate != calendarDate ||
+        activeAnchor != targetAnchor ||
+        _currentIndex >= availablePeriods.length) {
+      _lastCalendarDate = calendarDate;
+      _currentIndex = matchedIdx;
+      if (_pageController != null && _pageController!.hasClients) {
+        final currentPos = _pageController!.page?.round();
+        if (currentPos != matchedIdx) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_pageController != null && _pageController!.hasClients) {
+              _pageController!.jumpToPage(matchedIdx);
+            }
+          });
+        }
+      }
+    }
+
+    final currentAnchorDate = availablePeriods[_currentIndex];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
-      appBar: AppBar(
-        title: const Text(
-          'Overview',
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-      ),
-      body: Column(
-        children: [
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.only(bottom: 12.0),
-            child: Column(
-              children: [
-                // 1. 顶部时间维度可滑动按钮
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Column(
+                children: [
+                  // 1. Overview 标题 + 右侧时间维度切换下拉按钮
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _buildTimeRangeButton(
-                          TimeRange.byDay, 'By Day', selectedRange, settingsProvider),
-                      const SizedBox(width: 8),
-                      _buildTimeRangeButton(
-                          TimeRange.byWeek, 'By Week', selectedRange, settingsProvider),
-                      const SizedBox(width: 8),
-                      _buildTimeRangeButton(
-                          TimeRange.byMonth, 'By Month', selectedRange, settingsProvider),
-                      const SizedBox(width: 8),
-                      _buildTimeRangeButton(
-                          TimeRange.byYear, 'By Year', selectedRange, settingsProvider),
-                      const SizedBox(width: 8),
-                      _buildTimeRangeButton(
-                          TimeRange.all, 'All Time', selectedRange, settingsProvider),
+                      const Text(
+                        'Overview',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      PopupMenuButton<TimeRange>(
+                        onSelected: (TimeRange range) {
+                          settingsProvider.setTimeRange(range);
+                        },
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12.0),
+                        ),
+                        offset: const Offset(0, 36),
+                        itemBuilder: (context) => [
+                          _buildTimeRangePopupItem(TimeRange.byDay, 'By Day', selectedRange),
+                          _buildTimeRangePopupItem(TimeRange.byWeek, 'By Week', selectedRange),
+                          _buildTimeRangePopupItem(TimeRange.byMonth, 'By Month', selectedRange),
+                          _buildTimeRangePopupItem(TimeRange.byYear, 'By Year', selectedRange),
+                          _buildTimeRangePopupItem(TimeRange.all, 'All Time', selectedRange),
+                        ],
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A73E8).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20.0),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _getTimeRangeLabel(selectedRange),
+                                style: const TextStyle(
+                                  color: Color(0xFF1A73E8),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: Color(0xFF1A73E8),
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 8),
+                  const SizedBox(height: 4),
 
-                // 2. 日期翻页与标题
+                // 2. 日期翻页与标题（仅翻页到有打卡数据的时间段）
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
                       icon: Icon(
                         Icons.chevron_left,
-                        color: selectedRange == TimeRange.all
+                        color: (selectedRange == TimeRange.all || _currentIndex <= 0)
                             ? Colors.black26
                             : Colors.black87,
                       ),
-                      onPressed: selectedRange == TimeRange.all
+                      onPressed: (selectedRange == TimeRange.all || _currentIndex <= 0)
                           ? null
                           : () {
-                              if (_pageController.hasClients) {
-                                _pageController.previousPage(
+                              if (_pageController != null && _pageController!.hasClients) {
+                                _pageController!.previousPage(
                                   duration: const Duration(milliseconds: 250),
                                   curve: Curves.easeInOut,
                                 );
@@ -289,15 +373,15 @@ class _StatisticsViewState extends State<StatisticsView> {
                     IconButton(
                       icon: Icon(
                         Icons.chevron_right,
-                        color: selectedRange == TimeRange.all
+                        color: (selectedRange == TimeRange.all || _currentIndex >= availablePeriods.length - 1)
                             ? Colors.black26
                             : Colors.black87,
                       ),
-                      onPressed: selectedRange == TimeRange.all
+                      onPressed: (selectedRange == TimeRange.all || _currentIndex >= availablePeriods.length - 1)
                           ? null
                           : () {
-                              if (_pageController.hasClients) {
-                                _pageController.nextPage(
+                              if (_pageController != null && _pageController!.hasClients) {
+                                _pageController!.nextPage(
                                   duration: const Duration(milliseconds: 250),
                                   curve: Curves.easeInOut,
                                 );
@@ -311,18 +395,26 @@ class _StatisticsViewState extends State<StatisticsView> {
           ),
           Expanded(
             child: PageView.builder(
+              key: ValueKey(selectedRange),
               controller: _pageController,
+              itemCount: availablePeriods.length,
               physics: selectedRange == TimeRange.all
                   ? const NeverScrollableScrollPhysics()
                   : const BouncingScrollPhysics(),
               onPageChanged: (index) {
                 setState(() {
-                  _currentPageIndex = index;
+                  _currentIndex = index;
                 });
+                if (index < availablePeriods.length) {
+                  final selectedDate = availablePeriods[index];
+                  _lastCalendarDate = selectedDate;
+                  if (provider.selectedDate != selectedDate) {
+                    provider.setSelectedDate(selectedDate);
+                  }
+                }
               },
               itemBuilder: (context, pageIndex) {
-                final pageAnchorDate =
-                    _getAnchorDateForPage(pageIndex, selectedRange);
+                final pageAnchorDate = availablePeriods[pageIndex];
                 final statsMap = _calculateStatsForPage(
                     activities, categories, pageAnchorDate, selectedRange);
                 
@@ -455,11 +547,32 @@ class _StatisticsViewState extends State<StatisticsView> {
 
                       if (allStatsList.isEmpty)
                         Container(
-                          height: 180,
-                          alignment: Alignment.center,
-                          child: const Text(
-                            'No activity logs found for this period.',
-                            style: TextStyle(color: Colors.grey, fontSize: 14),
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 36.0, horizontal: 16.0),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16.0),
+                            border: Border.all(color: Colors.grey.shade200),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.calendar_today_outlined,
+                                size: 42,
+                                color: Colors.grey.shade400,
+                              ),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'No Activity Logs for This Day',
+                                style: TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                            ],
                           ),
                         )
                       else ...[
@@ -499,19 +612,32 @@ class _StatisticsViewState extends State<StatisticsView> {
                             return AnimatedOpacity(
                               duration: const Duration(milliseconds: 200),
                               opacity: isHidden ? 0.45 : 1.0, // 💡 隐藏后变浅半透明
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0, vertical: 10.0),
-                                decoration: BoxDecoration(
-                                  color: isHidden ? Colors.grey.shade100 : Colors.white,
-                                  borderRadius: BorderRadius.circular(12.0),
-                                  border: Border.all(
-                                    color: isHidden
-                                        ? Colors.grey.shade300
-                                        : Colors.grey.shade200,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12.0),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => CategoryDetailScreen(
+                                        category: stat.category,
+                                        initialAnchorDate: pageAnchorDate,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16.0, vertical: 10.0),
+                                  decoration: BoxDecoration(
+                                    color: isHidden ? Colors.grey.shade100 : Colors.white,
+                                    borderRadius: BorderRadius.circular(12.0),
+                                    border: Border.all(
+                                      color: isHidden
+                                          ? Colors.grey.shade300
+                                          : Colors.grey.shade200,
+                                    ),
                                   ),
-                                ),
-                                child: Row(
+                                  child: Row(
                                   children: [
                                     CircleAvatar(
                                       radius: 18,
@@ -592,6 +718,7 @@ class _StatisticsViewState extends State<StatisticsView> {
                                   ],
                                 ),
                               ),
+                              ),
                             );
                           },
                         ),
@@ -603,6 +730,49 @@ class _StatisticsViewState extends State<StatisticsView> {
               },
             ),
           ),
+        ],
+      ),
+    ),
+    );
+  }
+
+  String _getTimeRangeLabel(TimeRange range) {
+    switch (range) {
+      case TimeRange.byDay:
+        return 'By Day';
+      case TimeRange.byWeek:
+        return 'By Week';
+      case TimeRange.byMonth:
+        return 'By Month';
+      case TimeRange.byYear:
+        return 'By Year';
+      case TimeRange.all:
+        return 'All Time';
+    }
+  }
+
+  PopupMenuItem<TimeRange> _buildTimeRangePopupItem(
+      TimeRange range, String label, TimeRange selectedRange) {
+    final isSelected = range == selectedRange;
+    return PopupMenuItem<TimeRange>(
+      value: range,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? const Color(0xFF1A73E8) : Colors.black87,
+              fontSize: 13.5,
+            ),
+          ),
+          if (isSelected)
+            const Icon(
+              Icons.check_rounded,
+              size: 16,
+              color: Color(0xFF1A73E8),
+            ),
         ],
       ),
     );
@@ -927,51 +1097,6 @@ class _StatisticsViewState extends State<StatisticsView> {
             ],
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildTimeRangeButton(
-    TimeRange range,
-    String label,
-    TimeRange currentSelectedRange,
-    SettingsProvider settingsProvider,
-  ) {
-    final isSelected = currentSelectedRange == range;
-    return GestureDetector(
-      onTap: () {
-        if (currentSelectedRange != range) {
-          settingsProvider.setTimeRange(range);
-
-          setState(() {
-            _currentPageIndex = _basePageOffset;
-          });
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_pageController.hasClients) {
-              _pageController.jumpToPage(_basePageOffset);
-            }
-          });
-        }
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF1A73E8) : Colors.white,
-          borderRadius: BorderRadius.circular(20.0),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF1A73E8) : Colors.grey.shade300,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
       ),
     );
   }

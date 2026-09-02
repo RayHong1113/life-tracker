@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/activity_log.dart';
+import '../../models/activity_category.dart';
 import '../../providers/activity_provider.dart';
 import 'add_activity_screen.dart';
 
@@ -116,15 +117,16 @@ class _CalendarViewState extends State<CalendarView> {
     }
   }
 
-  void _openAddOrEditActivityScreen(
+  Future<void> _openAddOrEditActivityScreen(
     BuildContext context, {
     required DateTime selectedDate,
     int? initialHour,
     int? initialMinute,
+    DateTime? initialStartTime,
     ActivityLog? existingActivity,
-  }) {
-    DateTime? customStartTime;
-    if (initialHour != null) {
+  }) async {
+    DateTime? customStartTime = initialStartTime;
+    if (customStartTime == null && initialHour != null) {
       customStartTime = DateTime(
         selectedDate.year,
         selectedDate.month,
@@ -134,7 +136,7 @@ class _CalendarViewState extends State<CalendarView> {
       );
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => AddActivityScreen(
@@ -147,21 +149,27 @@ class _CalendarViewState extends State<CalendarView> {
     );
   }
 
-  /// 💡 关键辅助函数：计算给定 hour 内被占用的最大分钟偏移量 (0~60)
-  int _getOccupiedMinutesInHour(int hour, List<ActivityLog> dayActivities) {
+  /// 💡 关键辅助函数：计算给定 targetDate 和 hour 内被占用的最大分钟偏移量 (0~60)
+  int _getOccupiedMinutesInHour(
+      DateTime targetDate, int hour, List<ActivityLog> dayActivities) {
     int maxEndMinute = 0;
+
+    final hourStart =
+        DateTime(targetDate.year, targetDate.month, targetDate.day, hour, 0, 0);
+    final hourEnd = DateTime(
+        targetDate.year, targetDate.month, targetDate.day, hour, 59, 59);
 
     for (var activity in dayActivities) {
       final start = activity.startTime;
       final end = activity.endTime ?? start.add(const Duration(hours: 1));
 
-      final hourStart = DateTime(start.year, start.month, start.day, hour, 0);
-      final hourEnd = DateTime(start.year, start.month, start.day, hour, 59, 59);
-
       if (start.isBefore(hourEnd) && end.isAfter(hourStart)) {
-        if (end.hour > hour) {
+        if (end.isAfter(hourEnd)) {
           maxEndMinute = 60;
-        } else if (end.hour == hour) {
+        } else if (end.year == targetDate.year &&
+            end.month == targetDate.month &&
+            end.day == targetDate.day &&
+            end.hour == hour) {
           if (end.minute > maxEndMinute) {
             maxEndMinute = end.minute;
           }
@@ -171,10 +179,49 @@ class _CalendarViewState extends State<CalendarView> {
     return maxEndMinute;
   }
 
+  /// 💡 智能计算从 startHour 开始的最佳起始时间（处理整点全满及跨天任务）
+  DateTime _getSmartStartTime(
+      DateTime targetDate, int startHour, List<ActivityLog> dayActivities) {
+    int currentHour = startHour;
+
+    while (currentHour < 24) {
+      final occupied =
+          _getOccupiedMinutesInHour(targetDate, currentHour, dayActivities);
+      if (occupied < 60) {
+        return DateTime(
+          targetDate.year,
+          targetDate.month,
+          targetDate.day,
+          currentHour,
+          occupied,
+        );
+      }
+      currentHour++;
+    }
+
+    final nextDay = targetDate.add(const Duration(days: 1));
+    return DateTime(nextDay.year, nextDay.month, nextDay.day, 0, 0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<ActivityProvider>(context);
     final selectedDate = provider.selectedDate;
+    final targetPageIndex = _getPageIndexFromDate(selectedDate);
+
+    if (_pageController.hasClients && !_isAnimatingPage) {
+      final currentPage = _pageController.page?.round() ?? _basePageOffset;
+      if (currentPage != targetPageIndex) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_pageController.hasClients && !_isAnimatingPage) {
+            final curr = _pageController.page?.round() ?? _basePageOffset;
+            if (curr != targetPageIndex) {
+              _pageController.jumpToPage(targetPageIndex);
+            }
+          }
+        });
+      }
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
@@ -204,10 +251,9 @@ class _CalendarViewState extends State<CalendarView> {
               children: [
                 _buildDateHeaderForPage(context, provider, pageDate),
                 Expanded(
-                  child: FutureBuilder<List<ActivityLog>>(
-                    future: provider.getActivitiesForDate(pageDate),
-                    builder: (context, snapshot) {
-                      final pageActivities = snapshot.data ?? [];
+                  child: Builder(
+                    builder: (context) {
+                      final pageActivities = provider.getActivitiesForDateSync(pageDate);
                       final positionedActivities =
                           _calculateOverlapPositions(pageActivities);
 
@@ -232,7 +278,7 @@ class _CalendarViewState extends State<CalendarView> {
                                 children: [
                                   Column(
                                     children: List.generate(24, (hour) {
-                                      return _buildFixedHourCell(hour, pageActivities);
+                                      return _buildFixedHourCell(hour, pageActivities, pageDate);
                                     }),
                                   ),
                                   ...positionedActivities.map((pos) {
@@ -261,19 +307,30 @@ class _CalendarViewState extends State<CalendarView> {
         elevation: 2,
         backgroundColor: const Color(0xFF1A73E8),
         onPressed: () async {
-          int? minuteOffset;
+          DateTime? smartStartTime;
           if (_selectedHour != null) {
-            final currentActivities = await provider.getActivitiesForDate(selectedDate);
-            final occupied = _getOccupiedMinutesInHour(_selectedHour!, currentActivities);
-            minuteOffset = occupied < 60 ? occupied : 0;
+            final currentActivities =
+                await provider.getActivitiesForDate(selectedDate);
+            if (_isFullHourSelected) {
+              smartStartTime = DateTime(
+                selectedDate.year,
+                selectedDate.month,
+                selectedDate.day,
+                _selectedHour!,
+                0,
+              );
+            } else {
+              smartStartTime = _getSmartStartTime(
+                  selectedDate, _selectedHour!, currentActivities);
+            }
           }
 
           if (context.mounted) {
             _openAddOrEditActivityScreen(
               context,
               selectedDate: selectedDate,
-              initialHour: _selectedHour,
-              initialMinute: minuteOffset,
+              initialHour: smartStartTime?.hour ?? _selectedHour,
+              initialStartTime: smartStartTime,
             );
           }
         },
@@ -417,12 +474,12 @@ class _CalendarViewState extends State<CalendarView> {
     return sorted;
   }
 
-  Widget _buildFixedHourCell(int hour, List<ActivityLog> pageActivities) {
+  Widget _buildFixedHourCell(int hour, List<ActivityLog> pageActivities, DateTime pageDate) {
     final amPm = hour >= 12 ? 'PM' : 'AM';
     final formattedHour = hour % 12 == 0 ? 12 : hour % 12;
     final isSelected = _selectedHour == hour;
 
-    final occupiedMinutes = _getOccupiedMinutesInHour(hour, pageActivities);
+    final occupiedMinutes = _getOccupiedMinutesInHour(pageDate, hour, pageActivities);
     
     // 💡 关键：如果是全选模式或者没有占用，从 0 分钟开始；如果是点击右侧，从 occupiedMinutes 开始
     final startMinute = (isSelected && _isFullHourSelected) ? 0 : (occupiedMinutes < 60 ? occupiedMinutes : 0);
@@ -542,7 +599,7 @@ class _CalendarViewState extends State<CalendarView> {
     final double leftOffset = _timeLabelWidth + (pos.column * columnWidth) + _cellHorizontalMargin;
     final double cardWidth = (columnWidth - (_cellHorizontalMargin * 2.0)).clamp(20.0, gridContentWidth);
 
-    final bool useVerticalLayout = cardWidth < 80.0 || pos.totalColumns > 2;
+    final bool useVerticalLayout = cardWidth < 220.0 || pos.totalColumns >= 2;
 
     return Positioned(
       top: topOffset,
@@ -574,18 +631,18 @@ class _CalendarViewState extends State<CalendarView> {
                 existingActivity: activity,
               );
             },
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: 3.0, 
-                vertical: cardHeight < 12.0 ? 0.0 : 1.0
-              ),
+            child: Container(
+              alignment: Alignment.topLeft,
+              padding: const EdgeInsets.only(left: 6.0, right: 1.5, top: 4.0, bottom: 2.0),
               child: cardHeight < 14.0 
                   ? const SizedBox.shrink()
-                  : (cardHeight < 38.0 
-                      ? _buildSingleLineLayout(activity, startTime, endTime, provider)
-                      : (useVerticalLayout
-                          ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, provider)
-                          : _buildHorizontalLayout(activity, startTime, endTime, cardHeight, provider))),
+                  : (cardWidth < 50.0
+                      ? _buildCompactMicroLayout(activity, startTime, cardHeight, provider)
+                      : (cardHeight < 36.0 
+                          ? _buildSingleLineLayout(activity, startTime, endTime, cardWidth, provider)
+                          : (useVerticalLayout
+                              ? _buildVerticalLayout(activity, startTime, endTime, cardHeight, cardWidth, provider)
+                              : _buildHorizontalLayout(activity, startTime, endTime, cardHeight, provider)))),
             ),
           ),
         ),
@@ -593,41 +650,158 @@ class _CalendarViewState extends State<CalendarView> {
     );
   }
 
+  ActivityCategory _getCategoryForActivity(
+      ActivityLog activity, ActivityProvider provider) {
+    final actTitle = activity.title.trim().toLowerCase();
+    for (var cat in provider.categories) {
+      if (cat.name.trim().toLowerCase() == actTitle) {
+        return cat;
+      }
+    }
+
+    IconData fallbackIcon = Icons.label_outline;
+    if (actTitle.contains('code') || actTitle.contains('coding') || actTitle.contains('dev')) {
+      fallbackIcon = Icons.code;
+    } else if (actTitle.contains('work') || actTitle.contains('job')) {
+      fallbackIcon = Icons.work_outline;
+    } else if (actTitle.contains('study') || actTitle.contains('read') || actTitle.contains('book')) {
+      fallbackIcon = Icons.school_outlined;
+    } else if (actTitle.contains('workout') || actTitle.contains('gym') || actTitle.contains('fit') || actTitle.contains('sport')) {
+      fallbackIcon = Icons.fitness_center;
+    } else if (actTitle.contains('game') || actTitle.contains('play')) {
+      fallbackIcon = Icons.sports_esports_outlined;
+    } else if (actTitle.contains('cook') || actTitle.contains('food') || actTitle.contains('eat')) {
+      fallbackIcon = Icons.restaurant;
+    } else if (actTitle.contains('shop') || actTitle.contains('buy')) {
+      fallbackIcon = Icons.shopping_bag_outlined;
+    } else if (actTitle.contains('rest') || actTitle.contains('sleep') || actTitle.contains('nap')) {
+      fallbackIcon = Icons.bedtime_outlined;
+    }
+
+    return ActivityCategory(
+      id: '0',
+      name: activity.title,
+      icon: fallbackIcon,
+      color: activity.color,
+    );
+  }
+
+  Widget _buildCompactMicroLayout(
+    ActivityLog activity,
+    DateTime startTime,
+    double cardHeight,
+    ActivityProvider provider,
+  ) {
+    final category = _getCategoryForActivity(activity, provider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Icon(
+              category.icon,
+              color: Colors.white,
+              size: 9,
+            ),
+            const SizedBox(width: 2),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  activity.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 9.5,
+                    height: 1.1,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (cardHeight > 22.0)
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _formatTime(startTime),
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 7.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildSingleLineLayout(
     ActivityLog activity,
     DateTime startTime,
     DateTime endTime,
+    double cardWidth,
     ActivityProvider provider,
   ) {
+    final category = _getCategoryForActivity(activity, provider);
+    final showFullTime = cardWidth >= 110.0;
+    final showShortTime = cardWidth >= 65.0;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Expanded(
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: activity.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 10,
-                  ),
-                ),
-                TextSpan(
-                  text: '       ${_formatTime(startTime)} - ${_formatTime(endTime)}',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.normal,
-                    fontSize: 8.5,
-                  ),
-                ),
-              ],
-            ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
+        CircleAvatar(
+          radius: 8,
+          backgroundColor: Colors.white24,
+          child: Icon(
+            category.icon,
+            color: Colors.white,
+            size: 9,
           ),
         ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              activity.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+        ),
+        if (showShortTime) ...[
+          const SizedBox(width: 4),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                showFullTime
+                    ? '${_formatTime(startTime)} - ${_formatTime(endTime)}'
+                    : _formatTime(startTime),
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 9.0,
+                ),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(width: 2),
         GestureDetector(
           onTap: () => _safeDeleteActivity(provider, activity),
@@ -648,52 +822,116 @@ class _CalendarViewState extends State<CalendarView> {
     double cardHeight,
     ActivityProvider provider,
   ) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    final category = _getCategoryForActivity(activity, provider);
+
+    final labels = activity.labelNames.isNotEmpty
+        ? activity.labelNames
+        : (activity.labelName != null && activity.labelName!.isNotEmpty
+            ? [activity.labelName!]
+            : <String>[]);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                activity.title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                  height: 1.1,
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 8,
+              backgroundColor: Colors.white24,
+              child: Icon(
+                category.icon,
+                color: Colors.white,
+                size: 9,
               ),
-              if (cardHeight > 38.0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 1.0),
-                  child: Text(
-                    '${_formatTime(startTime)} - ${_formatTime(endTime)}',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w500,
-                      height: 1.1,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  activity.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    height: 1.1,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${_formatTime(startTime)} - ${_formatTime(endTime)}',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
-          ),
+              ),
+            ),
+            const SizedBox(width: 1.5),
+            GestureDetector(
+              onTap: () => _safeDeleteActivity(provider, activity),
+              child: const Icon(
+                Icons.close,
+                size: 12,
+                color: Colors.white70,
+              ),
+            ),
+          ],
         ),
-        GestureDetector(
-          onTap: () => _safeDeleteActivity(provider, activity),
-          child: const Icon(
-            Icons.close,
-            size: 13,
-            color: Colors.white70,
+        if (cardHeight > 34.0 && activity.description.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2.0, left: 20.0),
+            child: Text(
+              activity.description,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 9,
+                fontWeight: FontWeight.w400,
+                height: 1.1,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
           ),
-        ),
+        if (cardHeight > 50.0 && labels.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 3.0, left: 20.0),
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 2,
+              children: labels.map((lbl) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    lbl,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
       ],
     );
   }
@@ -703,63 +941,127 @@ class _CalendarViewState extends State<CalendarView> {
     DateTime startTime,
     DateTime endTime,
     double cardHeight,
+    double cardWidth,
     ActivityProvider provider,
   ) {
+    final category = _getCategoryForActivity(activity, provider);
+
+    final labels = activity.labelNames.isNotEmpty
+        ? activity.labelNames
+        : (activity.labelName != null && activity.labelName!.isNotEmpty
+            ? [activity.labelName!]
+            : <String>[]);
+
+    final showTime = cardHeight > 24.0;
+    final showFullTime = cardWidth >= 95.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
-              child: Text(
-                activity.title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 10,
-                  height: 1.1,
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 8,
+                    backgroundColor: Colors.white24,
+                    child: Icon(
+                      category.icon,
+                      color: Colors.white,
+                      size: 9,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        activity.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          height: 1.1,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+            const SizedBox(width: 4),
             GestureDetector(
               onTap: () => _safeDeleteActivity(provider, activity),
               child: const Icon(
                 Icons.close,
-                size: 11,
+                size: 10,
                 color: Colors.white70,
               ),
             ),
           ],
         ),
-        if (cardHeight > 32.0) ...[
+        if (showTime) ...[
           const SizedBox(height: 1),
-          Text(
-            _formatTime(startTime),
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 8.5,
-              fontWeight: FontWeight.w500,
-              height: 1.0,
-            ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
-          if (cardHeight > 46.0)
-            Text(
-              '- ${_formatTime(endTime)}',
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              showFullTime
+                  ? '${_formatTime(startTime)} - ${_formatTime(endTime)}'
+                  : _formatTime(startTime),
               style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 8.5,
                 fontWeight: FontWeight.w500,
-                height: 1.0,
               ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
             ),
+          ),
+        ],
+        if (cardHeight > 42.0 && activity.description.isNotEmpty) ...[
+          const SizedBox(height: 1),
+          Text(
+            activity.description,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 8,
+              fontWeight: FontWeight.w400,
+              height: 1.1,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ],
+        if (cardHeight > 58.0 && labels.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Wrap(
+            spacing: 3,
+            runSpacing: 2,
+            children: labels.take(2).map((lbl) {
+              return Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  lbl,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
         ],
       ],
     );

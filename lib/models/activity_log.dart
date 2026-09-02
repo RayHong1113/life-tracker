@@ -7,6 +7,9 @@ class ActivityLog {
   final DateTime? endTime;
   final String description;
   final Color color;
+  final String? labelId;
+  final String? labelName;
+  final List<String> labelNames;
 
   ActivityLog({
     required this.id,
@@ -15,9 +18,17 @@ class ActivityLog {
     this.endTime,
     this.description = '',
     this.color = const Color(0xFF1A73E8),
+    this.labelId,
+    this.labelName,
+    this.labelNames = const [],
   });
 
   Map<String, dynamic> toMap() {
+    final mergedLabels = Set<String>.from(labelNames);
+    if (labelName != null && labelName!.isNotEmpty) {
+      mergedLabels.add(labelName!);
+    }
+
     return {
       'id': id,
       'title': title,
@@ -25,19 +36,66 @@ class ActivityLog {
       'end_time': endTime?.toIso8601String(),
       'description': description,
       'color': color.toARGB32(),
+      'label_id': labelId,
+      'label_name': labelName ?? (mergedLabels.isNotEmpty ? mergedLabels.first : null),
+      'label_names': mergedLabels.join(';;;'),
     };
   }
 
   factory ActivityLog.fromMap(Map<String, dynamic> map) {
+    Color parseColor(dynamic rawColor) {
+      if (rawColor == null) return const Color(0xFF1A73E8);
+      if (rawColor is int) return Color(rawColor);
+      if (rawColor is String) {
+        final parsed = int.tryParse(rawColor) ??
+            int.tryParse(rawColor.replaceFirst('#', '0x')) ??
+            int.tryParse('0xFF${rawColor.replaceFirst('#', '')}');
+        if (parsed != null) return Color(parsed);
+      }
+      return const Color(0xFF1A73E8);
+    }
+
+    DateTime parseDate(dynamic rawDate) {
+      if (rawDate == null) return DateTime.now();
+      if (rawDate is DateTime) return rawDate;
+      return DateTime.tryParse(rawDate.toString()) ?? DateTime.now();
+    }
+
+    List<String> parseLabels() {
+      final Set<String> list = {};
+      final rawNames = map['label_names']?.toString();
+      if (rawNames != null && rawNames.isNotEmpty) {
+        final parts = rawNames.contains(';;;')
+            ? rawNames.split(';;;')
+            : rawNames.split(',');
+        for (var p in parts) {
+          if (p.trim().isNotEmpty) list.add(p.trim());
+        }
+      }
+      final singleName = map['label_name']?.toString();
+      if (singleName != null && singleName.isNotEmpty) {
+        list.add(singleName.trim());
+      }
+      return list.toList();
+    }
+
+    final parsedLabelList = parseLabels();
+
     return ActivityLog(
-      id: map['id'],
-      title: map['title'],
-      startTime: DateTime.parse(map['start_time']),
-      endTime: map['end_time'] != null ? DateTime.parse(map['end_time']) : null,
-      description: map['description'] ?? '',
-      color: map['color'] != null
-          ? Color(map['color'])
-          : const Color(0xFF1A73E8),
+      id: map['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      title: map['title']?.toString() ?? 'Activity',
+      startTime: parseDate(map['start_time']),
+      endTime: map['end_time'] != null ? parseDate(map['end_time']) : null,
+      description: map['description']?.toString() ?? '',
+      color: parseColor(map['color']),
+      labelId: map['label_id']?.toString(),
+      labelName: map['label_name']?.toString() ?? (parsedLabelList.isNotEmpty ? parsedLabelList.first : null),
+      labelNames: parsedLabelList,
     );
+  }
+
+  Duration get duration {
+    final end = endTime ?? startTime.add(const Duration(hours: 1));
+    return end.difference(startTime);
   }
 }

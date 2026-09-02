@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "625366027682",
+    "project_id": "lifetracker-70b80",
+    "storage_bucket": "lifetracker-70b80.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:625366027682:android:ebae7207971b3aa67036fb",
+        "android_client_info": {
+          "package_name": "com.example.life_tracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "625366027682-th24pmv3422h06h5kgfg8ifhtdn5krbs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA7tZ4M929KYapnH04IT38kW65OV9a_t3c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "625366027682-th24pmv3422h06h5kgfg8ifhtdn5krbs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

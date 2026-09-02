@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/activity_log.dart';
 import '../../models/activity_category.dart';
 import '../../providers/activity_provider.dart';
+import '../settings/manage_labels_screen.dart';
 
 class AddActivityScreen extends StatefulWidget {
   final DateTime selectedDate;
@@ -31,6 +32,7 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
   late TimeOfDay _endTimeOfDay;
 
   ActivityCategory? _selectedCategory;
+  final Set<String> _selectedLabelNames = {};
 
   @override
   void initState() {
@@ -49,15 +51,45 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       final end = activity.endTime ?? activity.startTime.add(const Duration(hours: 1));
       _endDate = end;
       _endTimeOfDay = TimeOfDay.fromDateTime(end);
+
+      _selectedLabelNames.addAll(activity.labelNames);
+      if (activity.labelName != null && activity.labelName!.isNotEmpty) {
+        _selectedLabelNames.add(activity.labelName!);
+      }
     } else {
-      final targetHour = widget.initialHour ?? now.hour;
-      final targetMinute = widget.initialStartTime?.minute ?? 0;
+      final baseDate = widget.initialStartTime != null
+          ? DateTime(
+              widget.initialStartTime!.year,
+              widget.initialStartTime!.month,
+              widget.initialStartTime!.day,
+            )
+          : widget.selectedDate;
 
-      _startDate = widget.selectedDate;
-      _startTimeOfDay = TimeOfDay(hour: targetHour, minute: targetMinute);
+      final isToday = now.year == baseDate.year &&
+          now.month == baseDate.month &&
+          now.day == baseDate.day;
 
-      _endDate = DateTime(now.year, now.month, now.day);
-      _endTimeOfDay = TimeOfDay.fromDateTime(now);
+      _startDate = baseDate;
+
+      if (isToday) {
+        final targetHour =
+            widget.initialStartTime?.hour ?? widget.initialHour ?? now.hour;
+        final targetMinute = widget.initialStartTime?.minute ?? now.minute;
+
+        _startTimeOfDay = TimeOfDay(hour: targetHour, minute: targetMinute);
+        _endDate = baseDate;
+        _endTimeOfDay = TimeOfDay.fromDateTime(now);
+      } else {
+        final targetHour =
+            widget.initialStartTime?.hour ?? widget.initialHour ?? 9;
+        final targetMinute = widget.initialStartTime?.minute ?? 0;
+
+        _startTimeOfDay = TimeOfDay(hour: targetHour, minute: targetMinute);
+        _endDate = baseDate;
+        _endTimeOfDay = TimeOfDay(
+            hour: (_startTimeOfDay.hour + 1) % 24,
+            minute: _startTimeOfDay.minute);
+      }
 
       final startDateTime = DateTime(
         _startDate.year,
@@ -76,8 +108,9 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       );
 
       if (endDateTime.isBefore(startDateTime)) {
-        final adjustedEnd = startDateTime.add(const Duration(minutes: 15));
-        _endDate = DateTime(adjustedEnd.year, adjustedEnd.month, adjustedEnd.day);
+        final adjustedEnd = startDateTime.add(const Duration(hours: 1));
+        _endDate =
+            DateTime(adjustedEnd.year, adjustedEnd.month, adjustedEnd.day);
         _endTimeOfDay = TimeOfDay.fromDateTime(adjustedEnd);
       }
     }
@@ -172,6 +205,8 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
     }
 
     final isEditing = widget.existingActivity != null;
+    final firstLabel = _selectedLabelNames.isNotEmpty ? _selectedLabelNames.first : null;
+
     final activity = ActivityLog(
       id: isEditing
           ? widget.existingActivity!.id
@@ -181,13 +216,16 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       endTime: endDateTime,
       description: _notesController.text.trim(),
       color: category.color,
+      labelId: firstLabel,
+      labelName: firstLabel,
+      labelNames: _selectedLabelNames.toList(),
     );
 
     final provider = Provider.of<ActivityProvider>(context, listen: false);
     if (isEditing) {
-      await provider.updateActivity(activity);
+      provider.updateActivity(activity);
     } else {
-      await provider.addActivity(activity);
+      provider.addActivity(activity);
     }
 
     if (mounted) {
@@ -381,6 +419,106 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                     ),
 
                     const SizedBox(height: 20),
+
+                    // 🏷️ Spendee 风格 1:1 复刻：Labels Header + 横向多选胶囊 Chip
+                    InkWell(
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ManageLabelsScreen(),
+                          ),
+                        );
+                        if (mounted) {
+                          setState(() {});
+                        }
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(
+                            horizontal: 16.0, vertical: 8.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.local_offer,
+                                    color: Color(0xFF00E676), size: 20),
+                                SizedBox(width: 12),
+                                Text(
+                                  'Labels',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Icon(Icons.chevron_right,
+                                color: Colors.white54, size: 20),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Row(
+                        children: provider.labels.map((label) {
+                          final isSelected =
+                              _selectedLabelNames.contains(label.name);
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  if (isSelected) {
+                                    _selectedLabelNames.remove(label.name);
+                                  } else {
+                                    _selectedLabelNames.add(label.name);
+                                  }
+                                });
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? const Color(0xFF00C853) // Spendee 翡翠亮绿
+                                      : const Color(0xFF2C353D), // Spendee 深灰黑
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (isSelected) ...[
+                                      const Icon(Icons.check,
+                                          color: Colors.white, size: 16),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    Text(
+                                      label.name,
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : Colors.white70,
+                                        fontSize: 13,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 16.0),

@@ -93,8 +93,8 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
     Color(0xFF3949AB), // 靛青蓝
     
     // 紫粉系
-    Color(0xFFA142F4), // 罗兰紫
-    Color(0xFF8E24AA), // 葡萄紫
+    Color(0xFF3F51B5), // 靛青蓝
+    Color(0xFF0288D1), // 深湖蓝
     Color(0xFFE52592), // 荧光粉
     Color(0xFFEC407A), // 珊瑚粉
     

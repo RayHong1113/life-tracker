@@ -29,102 +29,153 @@ class ManageCategoriesScreen extends StatelessWidget {
         backgroundColor: Colors.white,
         elevation: 0,
       ),
-      body: ListView(
+      body: ReorderableListView.builder(
         padding: const EdgeInsets.all(16.0),
-        children: [
-          Card(
+        itemCount: categories.length,
+        proxyDecorator: (child, index, animation) {
+          return AnimatedBuilder(
+            animation: animation,
+            builder: (context, child) {
+              return Material(
+                elevation: 4,
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
+                child: child,
+              );
+            },
+            child: child,
+          );
+        },
+        onReorder: (oldIndex, newIndex) {
+          provider.reorderCategories(oldIndex, newIndex);
+        },
+        itemBuilder: (context, index) {
+          final category = categories[index];
+          return Card(
+            key: ValueKey(category.id),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             elevation: 1,
-            child: ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: categories.length,
-              separatorBuilder: (context, index) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final category = categories[index];
-                return ListTile(
-                  leading: CircleAvatar(
+            margin: const EdgeInsets.only(bottom: 8.0),
+            child: ListTile(
+              leading: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: const Icon(Icons.drag_handle,
+                        color: Colors.grey, size: 22),
+                  ),
+                  const SizedBox(width: 8),
+                  CircleAvatar(
                     backgroundColor: category.color,
                     child: Icon(category.icon, color: Colors.white, size: 20),
                   ),
-                  title: Text(category.name,
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined,
-                            color: Colors.grey, size: 20),
-                        onPressed: () => _navigateToForm(context, category: category),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline,
-                            color: Colors.redAccent, size: 20),
-                        onPressed: () async {
-                          // 1. 如果只剩最后一个分类，不允许删除，弹底栏提示
-                          if (categories.length <= 1) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text(
-                                      'At least one category is required.')),
-                            );
-                            return;
-                          }
+                ],
+              ),
+              title: Text(category.name,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined,
+                        color: Colors.grey, size: 20),
+                    onPressed: () =>
+                        _navigateToForm(context, category: category),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        color: Colors.redAccent, size: 20),
+                    onPressed: () async {
+                      if (categories.length <= 1) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content:
+                                  Text('At least one category is required.')),
+                        );
+                        return;
+                      }
 
-                          // 💡 2. 只有多个分类时，先弹出对话框警告！
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (dialogContext) => AlertDialog(
-                              title: const Text('Delete Category?'),
-                              content: Text.rich(
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (dialogContext) => AlertDialog(
+                          title: const Text('Delete Category?'),
+                          content: Text.rich(
+                            TextSpan(
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  height: 1.4,
+                                  color: Colors.black87),
+                              children: [
+                                const TextSpan(text: 'By deleting '),
                                 TextSpan(
-                                  style: const TextStyle(fontSize: 13, height: 1.4, color: Colors.black87),
-                                  children: [
-                                    const TextSpan(text: 'By deleting '),
-                                    TextSpan(
-                                      text: category.name, // 💡 分类名字单独加粗
-                                      style: TextStyle(fontWeight: FontWeight.bold, color: category.color),
-                                    ),
-                                    const TextSpan(text: ', all activity logs recorded under this category will also be permanently deleted.'),
-                                  ],
+                                  text: category.name,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: category.color),
                                 ),
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(dialogContext, false),
-                                  child: const Text('Cancel'),
-                                ),
-                                TextButton(
-                                  style: TextButton.styleFrom(
-                                      foregroundColor: Colors.redAccent),
-                                  onPressed: () => Navigator.pop(dialogContext, true),
-                                  child: const Text('Delete',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                ),
+                                const TextSpan(
+                                    text:
+                                        ', all activity logs recorded under this category will also be permanently deleted.'),
                               ],
                             ),
-                          );
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                  foregroundColor: Colors.redAccent),
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, true),
+                              child: const Text('Delete',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      );
 
-                          // 💡 3. 只有用户在弹窗里点击了 Delete (confirm == true)，才执行删除
-                          if (confirm == true) {
-                            await provider.deleteCategory(category.id);
-                          }
-                        },
-                      ),
-                    ],
+                      if (confirm == true) {
+                        await provider.deleteCategory(category.id);
+                      }
+                    },
                   ),
-                );
-              },
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: () => _navigateToForm(context),
+              icon: const Icon(Icons.add, color: Colors.white, size: 22),
+              label: const Text(
+                'Add New Category',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1A73E8),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                elevation: 2,
+              ),
             ),
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFF1A73E8),
-        onPressed: () => _navigateToForm(context),
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+        ),
       ),
     );
   }

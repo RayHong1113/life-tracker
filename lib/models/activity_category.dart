@@ -5,12 +5,14 @@ class ActivityCategory {
   String name;
   IconData icon;
   Color color;
+  int sortOrder;
 
   ActivityCategory({
     required this.id,
     required this.name,
     required this.icon,
     required this.color,
+    this.sortOrder = 0,
   });
 
   Map<String, dynamic> toMap() {
@@ -19,6 +21,7 @@ class ActivityCategory {
       'name': name,
       'icon_code': icon.codePoint,
       'color': color.toARGB32(),
+      'sort_order': sortOrder,
     };
   }
 
@@ -28,6 +31,7 @@ class ActivityCategory {
       name: map['name'],
       icon: IconData(map['icon_code'], fontFamily: 'MaterialIcons'),
       color: Color(map['color']),
+      sortOrder: map['sort_order'] ?? 0,
     );
   }
 }

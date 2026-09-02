@@ -3,13 +3,23 @@ import 'package:provider/provider.dart';
 import 'providers/activity_provider.dart';
 import 'views/home/home_screen.dart';
 import 'providers/settings_provider.dart';
+import 'services/firebase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await FirebaseService.instance.init();
+  } catch (e) {
+    debugPrint('Firebase Service init error: $e');
+  }
+
   final settingsProvider = SettingsProvider();
-  await settingsProvider.loadSettings();
-  
-  // 💡 把加载好的 settingsProvider 传给 MyApp
+  try {
+    await settingsProvider.loadSettings();
+  } catch (e) {
+    debugPrint('Settings Provider load error: $e');
+  }
+
   runApp(MyApp(settingsProvider: settingsProvider));
 }
 
@@ -34,7 +44,7 @@ class MyApp extends StatelessWidget {
         title: 'Life Tracker',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A73E8)),
           useMaterial3: true,
         ),
         home: const HomeScreen(),
