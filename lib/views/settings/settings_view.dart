@@ -7,6 +7,7 @@ import '../../services/firebase_service.dart';
 import '../../services/auth_service.dart';
 import 'manage_categories_screen.dart';
 import 'manage_labels_screen.dart';
+import 'manage_excluded_days_screen.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key});
@@ -140,6 +141,7 @@ class _SettingsViewState extends State<SettingsView> {
                   await provider.fetchCategories();
                   await provider.fetchActivities();
                   setState(() {});
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
@@ -269,6 +271,7 @@ class _SettingsViewState extends State<SettingsView> {
                     await provider.fetchCategories();
                     await provider.fetchActivities();
                     setState(() {});
+                    if (!context.mounted) return;
                     final snackMsg = isSignUp
                         ? 'Account created! Firebase verification email sent to $email.'
                         : 'Welcome, ${user.displayName}! Cloud sync enabled.';
@@ -551,6 +554,27 @@ class _SettingsViewState extends State<SettingsView> {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const ManageLabelsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0xFFFCE8E6),
+                    child: Icon(Icons.event_busy_outlined,
+                        color: Color(0xFFD93025), size: 22),
+                  ),
+                  title: const Text('Excluded Days (Untracked)',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Exclude forgotten days from daily average calculations',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ManageExcludedDaysScreen(),
                       ),
                     );
                   },

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 void main() {
   test('Cross-day activity calculation test', () {
     // Cross-day activity: 11:00 PM on Aug 10 to 1:00 AM on Aug 11
-    final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);
 
     final crossDayActivity = ActivityLog(

@@ -35,7 +35,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => ActivityProvider()..fetchActivities(),
         ),
-        // 💡 关键：将 settingsProvider 注册进 MultiProvider
+        // Register settingsProvider into MultiProvider
         ChangeNotifierProvider<SettingsProvider>.value(
           value: settingsProvider,
         ),
