@@ -43,7 +43,7 @@ class TimelineHourCell extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 💡 1. 左侧时间标尺：点击选择【整个小时段】
+          // 1. Left time ruler: tap to select the full hour slot
           SizedBox(
             width: TimelineLayoutHelper.timeLabelWidth,
             child: InkWell(
@@ -65,7 +65,7 @@ class TimelineHourCell extends StatelessWidget {
             ),
           ),
 
-          // 💡 2. 右侧空白区域：点击选择【剩余可用时间段】
+          // 2. Right blank area: tap to select the remaining available time slot
           Expanded(
             child: InkWell(
               onTap: onSelectRemainingSlot,

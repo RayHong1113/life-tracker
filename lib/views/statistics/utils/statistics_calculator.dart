@@ -42,6 +42,16 @@ class StatisticsCalculator {
     }
     for (var act in activities) {
       periodSet.add(getPeriodAnchor(act.startTime, selectedRange));
+      if (act.endTime != null) {
+        final end = act.endTime!;
+        final endMoment = (end.hour == 0 &&
+                end.minute == 0 &&
+                end.second == 0 &&
+                end.isAfter(act.startTime))
+            ? DateTime(end.year, end.month, end.day - 1)
+            : end;
+        periodSet.add(getPeriodAnchor(endMoment, selectedRange));
+      }
     }
 
     final list = periodSet.toList()..sort((a, b) => a.compareTo(b));
@@ -59,9 +69,12 @@ class StatisticsCalculator {
       final weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return '${weekDays[anchorDate.weekday - 1]}, ${months[anchorDate.month - 1]} ${anchorDate.day}, ${anchorDate.year}';
     } else if (selectedRange == TimeRange.byWeek) {
-      final weekStart =
-          anchorDate.subtract(Duration(days: anchorDate.weekday - 1));
-      final weekEnd = weekStart.add(const Duration(days: 6));
+      final weekStart = DateTime(
+        anchorDate.year,
+        anchorDate.month,
+        anchorDate.day - (anchorDate.weekday - 1),
+      );
+      final weekEnd = DateTime(weekStart.year, weekStart.month, weekStart.day + 6);
 
       if (weekStart.month == weekEnd.month) {
         return '${months[weekStart.month - 1]} ${weekStart.day} - ${weekEnd.day}, ${weekStart.year}';
@@ -102,8 +115,11 @@ class StatisticsCalculator {
       if (activities.isEmpty) return 24 * 60;
       final earliest =
           activities.map((a) => a.startTime).reduce((a, b) => a.isBefore(b) ? a : b);
-      final days = DateTime.now().difference(earliest).inDays + 1;
-      return days * 24 * 60;
+      final now = DateTime.now();
+      final todayUtc = DateTime.utc(now.year, now.month, now.day);
+      final earliestUtc = DateTime.utc(earliest.year, earliest.month, earliest.day);
+      final days = todayUtc.difference(earliestUtc).inDays + 1;
+      return (days < 1 ? 1 : days) * 24 * 60;
     }
   }
 
@@ -121,12 +137,15 @@ class StatisticsCalculator {
 
     if (selectedRange == TimeRange.byDay) {
       windowStart = DateTime(anchorDate.year, anchorDate.month, anchorDate.day, 0, 0, 0);
-      windowEnd = windowStart.add(const Duration(days: 1));
+      windowEnd = DateTime(anchorDate.year, anchorDate.month, anchorDate.day + 1, 0, 0, 0);
     } else if (selectedRange == TimeRange.byWeek) {
-      final weekStart =
-          anchorDate.subtract(Duration(days: anchorDate.weekday - 1));
+      final weekStart = DateTime(
+        anchorDate.year,
+        anchorDate.month,
+        anchorDate.day - (anchorDate.weekday - 1),
+      );
       windowStart = DateTime(weekStart.year, weekStart.month, weekStart.day);
-      windowEnd = windowStart.add(const Duration(days: 7));
+      windowEnd = DateTime(weekStart.year, weekStart.month, weekStart.day + 7);
     } else if (selectedRange == TimeRange.byMonth) {
       windowStart = DateTime(anchorDate.year, anchorDate.month, 1);
       windowEnd = DateTime(anchorDate.year, anchorDate.month + 1, 1);
@@ -140,7 +159,15 @@ class StatisticsCalculator {
 
     for (var activity in activities) {
       final actStart = activity.startTime;
-      final actEnd = activity.endTime ?? actStart.add(const Duration(hours: 1));
+      final actEnd = activity.endTime ??
+          DateTime(
+            actStart.year,
+            actStart.month,
+            actStart.day,
+            actStart.hour + 1,
+            actStart.minute,
+            actStart.second,
+          );
 
       if (windowStart != null && windowEnd != null) {
         if (actEnd.isBefore(windowStart) ||
@@ -158,7 +185,26 @@ class StatisticsCalculator {
           ? windowEnd
           : actEnd;
 
-      final overlapDuration = effectiveEnd.difference(effectiveStart);
+      // Compute wall-clock duration via UTC components so DST changes never distort hours
+      final effectiveStartUtc = DateTime.utc(
+        effectiveStart.year,
+        effectiveStart.month,
+        effectiveStart.day,
+        effectiveStart.hour,
+        effectiveStart.minute,
+        effectiveStart.second,
+        effectiveStart.millisecond,
+      );
+      final effectiveEndUtc = DateTime.utc(
+        effectiveEnd.year,
+        effectiveEnd.month,
+        effectiveEnd.day,
+        effectiveEnd.hour,
+        effectiveEnd.minute,
+        effectiveEnd.second,
+        effectiveEnd.millisecond,
+      );
+      final overlapDuration = effectiveEndUtc.difference(effectiveStartUtc);
       if (overlapDuration.inMinutes <= 0) continue;
 
       final category = categories.firstWhere(

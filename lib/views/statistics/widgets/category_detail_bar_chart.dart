@@ -88,9 +88,10 @@ class CategoryDetailBarChart extends StatelessWidget {
                       } else if (granularity == CategoryDetailGranularity.year) {
                         if (group.x >= 1 && group.x <= 12) label = shortMonths[group.x - 1];
                       } else if (granularity == CategoryDetailGranularity.custom) {
+                        final now = DateTime.now();
                         final start = customDateRange?.start ??
-                            DateTime.now().subtract(const Duration(days: 30));
-                        final date = start.add(Duration(days: group.x - 1));
+                            DateTime(now.year, now.month, now.day - 30);
+                        final date = DateTime(start.year, start.month, start.day + (group.x - 1));
                         label = '${shortMonths[date.month - 1]} ${date.day}';
                       } else if (granularity == CategoryDetailGranularity.all) {
                         final mDate = DateTime(
@@ -150,9 +151,10 @@ class CategoryDetailBarChart extends StatelessWidget {
                                 style: const TextStyle(color: Colors.grey, fontSize: 10));
                           }
                         } else if (granularity == CategoryDetailGranularity.custom) {
+                          final now = DateTime.now();
                           final start = customDateRange?.start ??
-                              DateTime.now().subtract(const Duration(days: 30));
-                          final date = start.add(Duration(days: x - 1));
+                              DateTime(now.year, now.month, now.day - 30);
+                          final date = DateTime(start.year, start.month, start.day + (x - 1));
                           int step = 1;
                           if (barCount > 60) {
                             step = 15;

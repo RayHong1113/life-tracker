@@ -26,19 +26,30 @@ class ActivityCardCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final activity = pos.activity;
     final startTime = activity.startTime;
-    final endTime =
-        activity.endTime ?? startTime.add(const Duration(hours: 1));
+    final endTime = activity.endTime ??
+        DateTime(
+          startTime.year,
+          startTime.month,
+          startTime.day,
+          startTime.hour + 1,
+          startTime.minute,
+          startTime.second,
+        );
 
     final dayStart =
         DateTime(pageDate.year, pageDate.month, pageDate.day, 0, 0);
-    final dayEnd =
-        DateTime(pageDate.year, pageDate.month, pageDate.day, 23, 59, 59);
+    final nextDayStart =
+        DateTime(pageDate.year, pageDate.month, pageDate.day + 1, 0, 0);
 
-    final effectiveStart = startTime.isBefore(dayStart) ? dayStart : startTime;
-    final effectiveEnd = endTime.isAfter(dayEnd) ? dayEnd : endTime;
-
-    final startMinutes = effectiveStart.hour * 60 + effectiveStart.minute;
-    final durationMinutes = effectiveEnd.difference(effectiveStart).inMinutes;
+    // Compute wall-clock minutes on the 24-hour grid (0..1440) so DST/timezone
+    // transitions never distort visual card placement or height on the timeline.
+    final int startMinutes = startTime.isBefore(dayStart)
+        ? 0
+        : (startTime.hour * 60 + startTime.minute);
+    final int endMinutes = !endTime.isBefore(nextDayStart)
+        ? 24 * 60
+        : (endTime.hour * 60 + endTime.minute);
+    final int durationMinutes = (endMinutes - startMinutes).clamp(0, 24 * 60);
 
     final double pixelsPerMinute = TimelineLayoutHelper.hourHeight / 60.0;
 

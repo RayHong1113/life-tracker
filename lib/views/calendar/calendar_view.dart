@@ -43,10 +43,11 @@ class _CalendarViewState extends State<CalendarView> {
   }
 
   int _getPageIndexFromDate(DateTime date) {
-    final initialOnlyDate =
-        DateTime(_initialDate.year, _initialDate.month, _initialDate.day);
-    final targetOnlyDate = DateTime(date.year, date.month, date.day);
-    final dayDifference = targetOnlyDate.difference(initialOnlyDate).inDays;
+    // Use UTC calendar dates to compute exact calendar day difference without DST/timezone drift
+    final initialUtc =
+        DateTime.utc(_initialDate.year, _initialDate.month, _initialDate.day);
+    final targetUtc = DateTime.utc(date.year, date.month, date.day);
+    final dayDifference = targetUtc.difference(initialUtc).inDays;
     return _basePageOffset + dayDifference;
   }
 
@@ -193,12 +194,19 @@ class _CalendarViewState extends State<CalendarView> {
                   onDateSelected: (newDate) =>
                       _animateToDate(newDate, provider),
                   onPrevDay: () {
-                    final prevDate =
-                        pageDate.subtract(const Duration(days: 1));
+                    final prevDate = DateTime(
+                      pageDate.year,
+                      pageDate.month,
+                      pageDate.day - 1,
+                    );
                     _animateToDate(prevDate, provider);
                   },
                   onNextDay: () {
-                    final nextDate = pageDate.add(const Duration(days: 1));
+                    final nextDate = DateTime(
+                      pageDate.year,
+                      pageDate.month,
+                      pageDate.day + 1,
+                    );
                     _animateToDate(nextDate, provider);
                   },
                 ),

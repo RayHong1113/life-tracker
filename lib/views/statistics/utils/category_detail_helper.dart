@@ -13,6 +13,13 @@ class CategoryDetailHelper {
     );
   }
 
+  /// Computes exact calendar days between [from] and [to] using UTC dates to avoid DST drift.
+  static int daysBetween(DateTime from, DateTime to) {
+    final fromUtc = DateTime.utc(from.year, from.month, from.day);
+    final toUtc = DateTime.utc(to.year, to.month, to.day);
+    return toUtc.difference(fromUtc).inDays;
+  }
+
   /// Calculates the canonical anchor date for a given granularity.
   static DateTime getPeriodAnchor(
     DateTime date,
@@ -44,6 +51,7 @@ class CategoryDetailHelper {
               act.title.trim().toLowerCase() ==
               categoryName.trim().toLowerCase(),
         )
+        .expand(sliceActivityByDay)
         .toList();
 
     if (categoryLogs.isEmpty ||
@@ -98,7 +106,7 @@ class CategoryDetailHelper {
     switch (gran) {
       case CategoryDetailGranularity.week:
         final start = getStartOfWeek(date);
-        final end = start.add(const Duration(days: 6));
+        final end = DateTime(start.year, start.month, start.day + 6);
         if (start.month == end.month) {
           return '${shortMonths[start.month - 1]} ${start.day} - ${end.day}';
         } else {
@@ -170,11 +178,19 @@ class CategoryDetailHelper {
     final month = months[date.month - 1];
     return '$month ${date.day}';
   }
-  
-    /// Slices an activity crossing midnight into per-calendar-day slices.
+
+  /// Slices an activity crossing midnight into per-calendar-day slices.
   static List<ActivityLog> sliceActivityByDay(ActivityLog act) {
     final actStart = act.startTime;
-    final actEnd = act.endTime ?? actStart.add(const Duration(hours: 1));
+    final actEnd = act.endTime ??
+        DateTime(
+          actStart.year,
+          actStart.month,
+          actStart.day,
+          actStart.hour + 1,
+          actStart.minute,
+          actStart.second,
+        );
 
     // If starts and ends on the same calendar day, no slicing needed
     if (actStart.year == actEnd.year &&

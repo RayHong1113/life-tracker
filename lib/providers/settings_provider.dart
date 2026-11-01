@@ -114,7 +114,7 @@ class SettingsProvider extends ChangeNotifier {
       if (_excludedDates.add(formatDateKey(curr))) {
         addedCount++;
       }
-      curr = curr.add(const Duration(days: 1));
+      curr = DateTime(curr.year, curr.month, curr.day + 1);
     }
     if (addedCount > 0) {
       notifyListeners();

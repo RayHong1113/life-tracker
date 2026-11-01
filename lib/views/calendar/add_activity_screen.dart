@@ -45,11 +45,22 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
 
     if (isEditing) {
       final activity = widget.existingActivity!;
-      _startDate = activity.startTime;
+      _startDate = DateTime(
+        activity.startTime.year,
+        activity.startTime.month,
+        activity.startTime.day,
+      );
       _startTimeOfDay = TimeOfDay.fromDateTime(activity.startTime);
 
-      final end = activity.endTime ?? activity.startTime.add(const Duration(hours: 1));
-      _endDate = end;
+      final end = activity.endTime ??
+          DateTime(
+            activity.startTime.year,
+            activity.startTime.month,
+            activity.startTime.day,
+            activity.startTime.hour + 1,
+            activity.startTime.minute,
+          );
+      _endDate = DateTime(end.year, end.month, end.day);
       _endTimeOfDay = TimeOfDay.fromDateTime(end);
 
       _selectedLabelNames.addAll(activity.labelNames);
@@ -63,7 +74,11 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
               widget.initialStartTime!.month,
               widget.initialStartTime!.day,
             )
-          : widget.selectedDate;
+          : DateTime(
+              widget.selectedDate.year,
+              widget.selectedDate.month,
+              widget.selectedDate.day,
+            );
 
       final isToday = now.year == baseDate.year &&
           now.month == baseDate.month &&
@@ -108,7 +123,13 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       );
 
       if (endDateTime.isBefore(startDateTime)) {
-        final adjustedEnd = startDateTime.add(const Duration(hours: 1));
+        final adjustedEnd = DateTime(
+          startDateTime.year,
+          startDateTime.month,
+          startDateTime.day,
+          startDateTime.hour + 1,
+          startDateTime.minute,
+        );
         _endDate =
             DateTime(adjustedEnd.year, adjustedEnd.month, adjustedEnd.day);
         _endTimeOfDay = TimeOfDay.fromDateTime(adjustedEnd);
@@ -139,11 +160,11 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
     );
   }
 
-  /// 💡 低调小巧的精致 SnackBar 提示框
+  /// Displays a compact floating SnackBar notification.
   void _showLightSnackBar(String message) {
     if (!mounted) return;
     
-    // 先清理上一次的提示，防止快速点击时排队弹窗
+    // Clear previous SnackBar to avoid stacking notifications on rapid clicks
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -165,13 +186,13 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
             ),
           ],
         ),
-        behavior: SnackBarBehavior.floating, // 💡 1. 悬浮模式（非拉满全宽）
+        behavior: SnackBarBehavior.floating,
         elevation: 2.0,
-        backgroundColor: const Color(0xFF323F4B), // 💡 2. 柔和不刺眼的深灰蓝底色
+        backgroundColor: const Color(0xFF323F4B),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24.0), // 💡 3. 圆角胶囊形状
+          borderRadius: BorderRadius.circular(24.0),
         ),
-        margin: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 16.0), // 💡 4. 左右缩进，显得精致小巧
+        margin: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 16.0),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -198,7 +219,7 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       _endTimeOfDay.minute,
     );
 
-    // 保存前的合法性判定
+    // Validate time order before saving
     if (endDateTime.isBefore(startDateTime)) {
       _showLightSnackBar('End time cannot be earlier than start time');
       return;
@@ -331,7 +352,7 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                     );
                                     if (picked != null) {
                                       setState(() {
-                                        _startDate = picked;
+                                        _startDate = DateTime(picked.year, picked.month, picked.day);
                                         if (_endDate.isBefore(_startDate)) {
                                           _endDate = _startDate;
                                         }
@@ -373,7 +394,7 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                       lastDate: DateTime(2030),
                                     );
                                     if (picked != null) {
-                                      setState(() => _endDate = picked);
+                                      setState(() => _endDate = DateTime(picked.year, picked.month, picked.day));
                                     }
                                   },
                                   child: Text(_formatDate(_endDate), style: const TextStyle(color: Colors.white, fontSize: 12)),
@@ -420,7 +441,7 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
 
                     const SizedBox(height: 20),
 
-                    // 🏷️ Spendee 风格 1:1 复刻：Labels Header + 横向多选胶囊 Chip
+                    // Labels Header + Horizontal Multi-Select Chips
                     InkWell(
                       onTap: () async {
                         await Navigator.push(
@@ -486,8 +507,8 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
                                     horizontal: 14, vertical: 8),
                                 decoration: BoxDecoration(
                                   color: isSelected
-                                      ? const Color(0xFF00C853) // Spendee 翡翠亮绿
-                                      : const Color(0xFF2C353D), // Spendee 深灰黑
+                                      ? const Color(0xFF00C853)
+                                      : const Color(0xFF2C353D),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Row(

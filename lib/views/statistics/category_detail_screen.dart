@@ -65,8 +65,8 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
     final now = DateTime.now();
     final initial = _customDateRange ??
         DateTimeRange(
-          start: now.subtract(const Duration(days: 30)),
-          end: now,
+          start: DateTime(now.year, now.month, now.day - 30),
+          end: DateTime(now.year, now.month, now.day),
         );
 
     final picked = await showDateRangePicker(
@@ -386,7 +386,6 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
     ActivityProvider provider,
     DateTime targetPeriodDate,
   ) {
-    // Filter activities matching this category name within targetPeriodDate
     // 1. Filter activities for this category
     final rawCategoryActs = provider.activities.where((act) =>
         act.title.trim().toLowerCase() == widget.category.name.trim().toLowerCase());
@@ -396,15 +395,26 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
         .expand(CategoryDetailHelper.sliceActivityByDay)
         .toList();
 
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
     // 3. Filter logs that fall within targetPeriodDate
     final categoryLogs = slicedLogs.where((act) {
       final actStart = act.startTime;
-      final actEnd = act.endTime ?? actStart.add(const Duration(hours: 1));
+      final actEnd = act.endTime ??
+          DateTime(
+            actStart.year,
+            actStart.month,
+            actStart.day,
+            actStart.hour + 1,
+            actStart.minute,
+            actStart.second,
+          );
 
       switch (_granularity) {
         case CategoryDetailGranularity.week:
           final weekStart = CategoryDetailHelper.getStartOfWeek(targetPeriodDate);
-          final weekEnd = weekStart.add(const Duration(days: 7));
+          final weekEnd = DateTime(weekStart.year, weekStart.month, weekStart.day + 7);
           return actStart.isBefore(weekEnd) && actEnd.isAfter(weekStart);
 
         case CategoryDetailGranularity.month:
@@ -418,9 +428,10 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
           return actStart.isBefore(yearEnd) && actEnd.isAfter(yearStart);
 
         case CategoryDetailGranularity.custom:
-          final start = _customDateRange?.start ??
-              DateTime.now().subtract(const Duration(days: 30));
-          final end = (_customDateRange?.end ?? DateTime.now()).add(const Duration(days: 1));
+          final rawStart = _customDateRange?.start ?? DateTime(now.year, now.month, now.day - 30);
+          final rawEnd = _customDateRange?.end ?? today;
+          final start = DateTime(rawStart.year, rawStart.month, rawStart.day);
+          final end = DateTime(rawEnd.year, rawEnd.month, rawEnd.day + 1);
           return actStart.isBefore(end) && actEnd.isAfter(start);
 
         case CategoryDetailGranularity.all:
@@ -439,15 +450,12 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
 
     // Compute earliest recorded date
     DateTime allTimeEarliest = categoryLogs.isEmpty
-        ? DateTime(DateTime.now().year, DateTime.now().month, 1)
+        ? DateTime(now.year, now.month, 1)
         : categoryLogs.map((l) => l.startTime).reduce((a, b) => a.isBefore(b) ? a : b);
     allTimeEarliest = DateTime(allTimeEarliest.year, allTimeEarliest.month, 1);
 
     final settingsProvider = Provider.of<SettingsProvider>(context);
     final excludedDates = settingsProvider.excludedDates;
-
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
 
     int activeDays = 1;
     int excludedCountInPeriod = 0;
@@ -460,7 +468,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
 
         if (isCurrentWeek) {
           // Current in-progress week: count only days elapsed up to today
-          activeDays = today.difference(weekStart).inDays + 1;
+          activeDays = CategoryDetailHelper.daysBetween(weekStart, today) + 1;
           for (int i = 0; i < activeDays; i++) {
             final day = DateTime(weekStart.year, weekStart.month, weekStart.day + i);
             final key = SettingsProvider.formatDateKey(day);
@@ -517,7 +525,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
         if (isCurrentYear) {
           // Current in-progress year: count only days elapsed up to today
           final yearStart = DateTime(targetPeriodDate.year, 1, 1);
-          activeDays = today.difference(yearStart).inDays + 1;
+          activeDays = CategoryDetailHelper.daysBetween(yearStart, today) + 1;
           for (final key in excludedDates) {
             if (key.startsWith('${targetPeriodDate.year}-')) {
               try {
@@ -541,16 +549,15 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
         break;
 
       case CategoryDetailGranularity.custom:
-        final rawStart = _customDateRange?.start ??
-            DateTime.now().subtract(const Duration(days: 30));
-        final rawEnd = _customDateRange?.end ?? DateTime.now();
+        final rawStart = _customDateRange?.start ?? DateTime(now.year, now.month, now.day - 30);
+        final rawEnd = _customDateRange?.end ?? today;
         final start = DateTime(rawStart.year, rawStart.month, rawStart.day);
         final end = DateTime(rawEnd.year, rawEnd.month, rawEnd.day);
 
         // Cap effective end date at today if ongoing
         final isOngoing = !today.isBefore(start) && !today.isAfter(end);
         final effectiveEnd = isOngoing ? today : end;
-        activeDays = max(1, effectiveEnd.difference(start).inDays + 1);
+        activeDays = max(1, CategoryDetailHelper.daysBetween(start, effectiveEnd) + 1);
         for (int i = 0; i < activeDays; i++) {
           final day = DateTime(start.year, start.month, start.day + i);
           final key = SettingsProvider.formatDateKey(day);
@@ -563,7 +570,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
       case CategoryDetailGranularity.all:
         final firstDate = categoryLogs.isEmpty ? today : categoryLogs.last.startTime;
         final cleanFirst = DateTime(firstDate.year, firstDate.month, firstDate.day);
-        final totalDays = max(1, today.difference(cleanFirst).inDays + 1);
+        final totalDays = max(1, CategoryDetailHelper.daysBetween(cleanFirst, today) + 1);
         activeDays = totalDays;
         for (int i = 0; i < totalDays; i++) {
           final day = DateTime(cleanFirst.year, cleanFirst.month, cleanFirst.day + i);
@@ -617,17 +624,17 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
       for (int i = 1; i <= barCount; i++) {
         chartMinutes[i] = 0;
       }
-      final start = _customDateRange?.start ??
-          DateTime.now().subtract(const Duration(days: 30));
+      final rawStart = _customDateRange?.start ?? DateTime(now.year, now.month, now.day - 30);
+      final start = DateTime(rawStart.year, rawStart.month, rawStart.day);
       for (var log in categoryLogs) {
-        final dayOffset = log.startTime.difference(start).inDays + 1;
+        final dayOffset = CategoryDetailHelper.daysBetween(start, log.startTime) + 1;
         if (dayOffset >= 1 && dayOffset <= barCount) {
           chartMinutes[dayOffset] =
               (chartMinutes[dayOffset] ?? 0) + log.duration.inMinutes;
         }
       }
     } else {
-      final nowMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
+      final nowMonth = DateTime(now.year, now.month, 1);
       int totalAllTimeMonths = (nowMonth.year - allTimeEarliest.year) * 12 +
           (nowMonth.month - allTimeEarliest.month) + 1;
       totalAllTimeMonths = max(1, totalAllTimeMonths);

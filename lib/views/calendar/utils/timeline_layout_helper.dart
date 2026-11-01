@@ -23,7 +23,15 @@ class TimelineLayoutHelper {
 
     for (var pos in sorted) {
       final start = pos.activity.startTime;
-      final end = pos.activity.endTime ?? start.add(const Duration(hours: 1));
+      final end = pos.activity.endTime ??
+          DateTime(
+            start.year,
+            start.month,
+            start.day,
+            start.hour + 1,
+            start.minute,
+            start.second,
+          );
 
       if (currentGroup.isEmpty) {
         currentGroup.add(pos);
@@ -44,8 +52,15 @@ class TimelineLayoutHelper {
 
       for (var pos in group) {
         final start = pos.activity.startTime;
-        final end =
-            pos.activity.endTime ?? start.add(const Duration(hours: 1));
+        final end = pos.activity.endTime ??
+            DateTime(
+              start.year,
+              start.month,
+              start.day,
+              start.hour + 1,
+              start.minute,
+              start.second,
+            );
 
         int assignedColumn = -1;
 
@@ -82,14 +97,22 @@ class TimelineLayoutHelper {
     final hourStart =
         DateTime(targetDate.year, targetDate.month, targetDate.day, hour, 0, 0);
     final hourEnd = DateTime(
-        targetDate.year, targetDate.month, targetDate.day, hour, 59, 59);
+        targetDate.year, targetDate.month, targetDate.day, hour + 1, 0, 0);
 
     for (var activity in dayActivities) {
       final start = activity.startTime;
-      final end = activity.endTime ?? start.add(const Duration(hours: 1));
+      final end = activity.endTime ??
+          DateTime(
+            start.year,
+            start.month,
+            start.day,
+            start.hour + 1,
+            start.minute,
+            start.second,
+          );
 
       if (start.isBefore(hourEnd) && end.isAfter(hourStart)) {
-        if (end.isAfter(hourEnd)) {
+        if (!end.isBefore(hourEnd)) {
           maxEndMinute = 60;
         } else if (end.year == targetDate.year &&
             end.month == targetDate.month &&
@@ -124,8 +147,8 @@ class TimelineLayoutHelper {
       currentHour++;
     }
 
-    final nextDay = targetDate.add(const Duration(days: 1));
-    return DateTime(nextDay.year, nextDay.month, nextDay.day, 0, 0);
+    return DateTime(
+        targetDate.year, targetDate.month, targetDate.day + 1, 0, 0);
   }
 
   /// Formats time as '12:30 PM' or '9:00 AM'.

@@ -57,8 +57,35 @@ class ActivityLog {
 
     DateTime parseDate(dynamic rawDate) {
       if (rawDate == null) return DateTime.now();
-      if (rawDate is DateTime) return rawDate;
-      return DateTime.tryParse(rawDate.toString()) ?? DateTime.now();
+      if (rawDate is DateTime) {
+        return DateTime(
+          rawDate.year,
+          rawDate.month,
+          rawDate.day,
+          rawDate.hour,
+          rawDate.minute,
+          rawDate.second,
+          rawDate.millisecond,
+        );
+      }
+      final str = rawDate.toString().trim();
+      // Strip trailing 'Z' or timezone offset (+HH:MM / -HH:MM) so wall-clock
+      // calendar time is preserved consistently across timezones and cloud sync.
+      final wallClockStr = str.replaceFirst(
+        RegExp(r'(Z|[+-]\d{2}:?\d{2})$'),
+        '',
+      );
+      final parsed = DateTime.tryParse(wallClockStr) ?? DateTime.tryParse(str);
+      if (parsed == null) return DateTime.now();
+      return DateTime(
+        parsed.year,
+        parsed.month,
+        parsed.day,
+        parsed.hour,
+        parsed.minute,
+        parsed.second,
+        parsed.millisecond,
+      );
     }
 
     List<String> parseLabels() {
@@ -95,7 +122,34 @@ class ActivityLog {
   }
 
   Duration get duration {
-    final end = endTime ?? startTime.add(const Duration(hours: 1));
-    return end.difference(startTime);
+    final end = endTime ??
+        DateTime(
+          startTime.year,
+          startTime.month,
+          startTime.day,
+          startTime.hour + 1,
+          startTime.minute,
+          startTime.second,
+          startTime.millisecond,
+        );
+    final startUtc = DateTime.utc(
+      startTime.year,
+      startTime.month,
+      startTime.day,
+      startTime.hour,
+      startTime.minute,
+      startTime.second,
+      startTime.millisecond,
+    );
+    final endUtc = DateTime.utc(
+      end.year,
+      end.month,
+      end.day,
+      end.hour,
+      end.minute,
+      end.second,
+      end.millisecond,
+    );
+    return endUtc.difference(startUtc);
   }
 }

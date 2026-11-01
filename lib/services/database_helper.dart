@@ -168,13 +168,13 @@ class DatabaseHelper {
 
   Future<List<ActivityLog>> getActivitiesForDate(DateTime date) async {
     final dayStart = DateTime(date.year, date.month, date.day, 0, 0, 0);
-    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+    final dayEnd = DateTime(date.year, date.month, date.day + 1, 0, 0, 0);
 
     final allActivities = await getAllActivities();
 
     return allActivities.where((activity) {
       final start = activity.startTime;
-      final end = activity.endTime ?? start.add(const Duration(hours: 1));
+      final end = activity.endTime ?? DateTime(start.year, start.month, start.day, start.hour + 1, start.minute, start.second);
 
       return start.isBefore(dayEnd) && end.isAfter(dayStart);
     }).toList();
